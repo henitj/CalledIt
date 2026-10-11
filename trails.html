@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>Trails near you — CalledIt</title>
+  <meta name="description" content="Signed hiking and biking trails near you with Google photos and ratings, live weather, and details.">
+  <meta name="theme-color" content="#14532d">
+  <link rel="icon" type="image/png" href="assets/icon.png">
+  <link rel="apple-touch-icon" href="assets/icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Outfit:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body data-page="trails">
+  <main id="main">
+    <div class="wrap">
+      <!-- toolbar -->
+      <div class="toolbar" role="search">
+        <div class="search-row">
+          <div class="search-input-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <input id="searchInput" class="search-input" type="search" autocomplete="off"
+                   placeholder="Search a place — e.g. Zermatt, Boulder, Lake District…" aria-label="Search a place">
+          </div>
+          <button id="searchBtn" class="btn btn-primary" type="button">Search</button>
+          <button id="locateBtn" class="btn btn-soft" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-5.1-7-11a7 7 0 1 1 14 0c0 5.9-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
+            Near me
+          </button>
+          <div class="mode-toggle" role="group" aria-label="Activity">
+            <button type="button" id="modeHike">🥾 Hiking</button>
+            <button type="button" id="modeBike">🚴 Biking</button>
+          </div>
+        </div>
+        <p class="status-line" id="statusLine">Loading trails…</p>
+      </div>
+
+      <div id="errorBox"></div>
+
+      <!-- weather -->
+      <section aria-label="Weather at trailhead">
+        <div class="weather-strip" id="weatherStrip"></div>
+        <p class="weather-note" id="weatherNote"></p>
+      </section>
+
+      <!-- google highlights -->
+      <section class="highlights" id="highlights" hidden>
+        <h2><span class="g-mark">G</span> Top-rated spots nearby — photos &amp; ratings from Google Maps</h2>
+        <div class="highlights-row" id="highlightsRow"></div>
+      </section>
+
+      <!-- list + map -->
+      <div class="trails-layout">
+        <section aria-label="Trail results">
+          <div class="trail-list" id="trailList">
+            <div class="loading-state"><p class="loading-dots">Finding signed trails</p></div>
+          </div>
+        </section>
+        <aside class="map-panel" aria-label="Map">
+          <div id="googleMap"></div>
+          <iframe id="osmMap" class="map-frame" title="Map" style="display:none" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+          <p class="map-caption" id="mapCaption"></p>
+        </aside>
+      </div>
+
+      <p class="center muted" style="margin:26px 0 8px; font-size:.85rem">
+        💬 Have a question? Tap the <b>Ask</b> button — the trail assistant lives on this page.
+      </p>
+    </div>
+  </main>
+
+  <!-- trail details modal -->
+  <div class="modal-backdrop" id="modalBackdrop">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <button class="modal__close" id="modalClose" aria-label="Close details">✕</button>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <!-- ============ TRAIL ASSISTANT (trails page only) ============ -->
+  <button class="assistant-fab" id="assistantFab" type="button" aria-haspopup="dialog" aria-controls="assistantSheet">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12h.01M12 12h.01M16 12h.01"/><path d="M21 12a9 9 0 1 1-4.5-7.8L21 4l-.8 3.5A8.96 8.96 0 0 1 21 12z"/></svg>
+    Ask
+  </button>
+
+  <div class="assistant-sheet" id="assistantSheet" role="dialog" aria-label="Trail assistant">
+    <div class="assistant-sheet__head">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 4.9.6c0 1.7-2.4 2-2.4 3.4"/><path d="M12 17h.01"/></svg>
+      <div>
+        <h2>Trail assistant</h2>
+        <div class="sub">Answers from the trails loaded on this page</div>
+      </div>
+      <button type="button" id="assistantClose" aria-label="Close assistant">✕</button>
+    </div>
+    <div class="assistant-log" id="assistantLog"></div>
+    <div class="assistant-suggest" id="assistantSuggest"></div>
+    <form class="assistant-input" id="assistantForm">
+      <input id="assistantText" type="text" autocomplete="off" placeholder="e.g. easiest trails under 8 km…" aria-label="Ask about trails">
+      <button class="btn btn-primary btn-sm" type="submit">Send</button>
+    </form>
+  </div>
+
+  <noscript><p style="text-align:center; padding:20px">CalledIt needs JavaScript to find trails near you.</p></noscript>
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/trails.js"></script>
+</body>
+</html>

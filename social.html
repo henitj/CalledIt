@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>Community — trails for good — CalledIt</title>
+  <meta name="description" content="Trail condition reports, cleanup days, Pack-It-Out pledges and ideas for how CalledIt gives back to the trails.">
+  <meta name="theme-color" content="#14532d">
+  <link rel="icon" type="image/png" href="assets/icon.png">
+  <link rel="apple-touch-icon" href="assets/icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Outfit:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body data-page="social">
+  <main id="main">
+    <section class="hero">
+      <img class="hero__bg" src="assets/fallback-ridge.jpg" alt="A mountain ridge trail above the clouds">
+      <div class="hero__inner">
+        <span class="hero__eyebrow">Community</span>
+        <h1>Trails are better together.</h1>
+        <p>Report conditions, pick up after the few who forget, and leave every path better than you found it.</p>
+      </div>
+    </section>
+
+    <!-- Pack-it-out pledge -->
+    <section class="section section--tight">
+      <div class="wrap">
+        <div class="pledge-card">
+          <span class="chip chip--amber">Pack-It-Out pledge</span>
+          <div class="pledge-count" id="pledgeCount">0</div>
+          <p>hikers pledged to carry everything out — wrappers, peels, all of it.</p>
+          <div class="pledge-goal"><div id="pledgeBar"></div></div>
+          <p class="muted" style="color:rgba(255,255,255,.75); font-size:.85rem" id="pledgeGoalText"></p>
+          <div class="btn-row" style="margin-top:16px">
+            <button class="btn btn-amber" id="pledgeBtn" type="button">I pledge to pack it out 🌲</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- reports -->
+    <section class="section" aria-labelledby="reports-title">
+      <h2 class="section-title" id="reports-title">Trail conditions, by people who were just there</h2>
+      <p class="section-sub">Fresh reports from the community — mud, closures, trail work days and the good stuff too. Give kudos to helpful posts.</p>
+      <div class="wrap">
+        <div class="report-filters" id="reportFilters"></div>
+        <div class="report-list" id="reportList"></div>
+
+        <form class="report-form card card-pad" id="reportForm">
+          <h3 style="font-size:1.05rem">Add a report</h3>
+          <input id="reportTrail" type="text" maxlength="80" placeholder="Trail name — e.g. Matterhorn Glacier Trail" required>
+          <select id="reportType" required>
+            <option value="Kudos">🌟 Kudos — something great</option>
+            <option value="Muddy">💧 Muddy / wet</option>
+            <option value="Obstacle">🌲 Obstacle — fallen tree, rockfall…</option>
+            <option value="Closure">⛔ Closure / diversion</option>
+            <option value="Trail work">🛠 Trail work day</option>
+            <option value="Wildlife">🐿 Wildlife</option>
+          </select>
+          <textarea id="reportText" rows="3" maxlength="400" placeholder="What did you see? Where along the trail?" required></textarea>
+          <button class="btn btn-primary" type="submit">Post report</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- cleanup events -->
+    <section class="section section--tight" aria-labelledby="events-title">
+      <h2 class="section-title" id="events-title">Cleanup days</h2>
+      <p class="section-sub">Two hours, one bag, a much nicer trail. Coffee is on us.</p>
+      <div class="wrap" style="max-width:760px">
+        <div id="eventList"></div>
+      </div>
+    </section>
+
+    <!-- ideas -->
+    <section class="section" aria-labelledby="ideas-title">
+      <h2 class="section-title" id="ideas-title">More “trails for good”, coming soon</h2>
+      <p class="section-sub">What we’re building next with the community — tell us which one you want first.</p>
+      <div class="wrap">
+        <div class="grid grid-3">
+          <div class="card idea-card"><span class="badge" style="color:#166534">Gear-share library</span><h3>Borrow, don’t buy</h3><p class="muted">Neighbors lend poles, boots, tents and child carriers near each trailhead — try the outdoors without the price tag.</p></div>
+          <div class="card idea-card"><span class="badge" style="color:#166534">Hike-for-a-cause</span><h3>Miles that donate</h3><p class="muted">Log trail kilometres for monthly challenges; sponsors turn every km into real donations for rescue teams and conservation.</p></div>
+          <div class="card idea-card"><span class="badge" style="color:#166534">Trail karma quests</span><h3>Two-minute trail care</h3><p class="muted">Micro-volunteering pings along your route: photograph a broken sign, clear a water drain, report a hazard. Earn karma, verified by the community.</p></div>
+        </div>
+        <p class="center muted" style="margin-top:14px; font-size:.9rem">Also on the roadmap: buddy check-in, accessibility scouts, adopt-a-trail and car-free shuttle pooling.</p>
+      </div>
+    </section>
+  </main>
+
+  <noscript><p style="text-align:center; padding:20px">CalledIt needs JavaScript to run.</p></noscript>
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/social.js"></script>
+</body>
+</html>

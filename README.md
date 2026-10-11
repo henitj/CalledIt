@@ -25,7 +25,10 @@ python3 -m http.server 8000
 
 1. **Google Maps Platform** — Maps JavaScript API for the interactive map, Places API (New) for photos + ratings (and as trail entries where TrailSplits/OSM have no signed routes). The key in `js/config.js` was verified on 2026‑10‑11: it authenticates for the Maps JavaScript API and Places API (New), is unrestricted, and works on the web **and** inside the APK (`http://127.0.0.1:8765`). If Google can't load, a bundled **Leaflet** map with clean CARTO / OpenTopoMap tiles takes over (pins, live track and planned loops still work) — the old plain OSM iframe is gone.
 2. **TrailSplits API** — trails by bounding box, route relations, elevation profiles, place search, weather, **round-trip loop planning** (`/v1/roundtrips`) and **outdoor POIs** (`/pois/v1/bbox`: parking, water, toilets, shelters, viewpoints…). Keyless = 500 free credits/day per address; an optional key (Settings) is sent as `Authorization: Bearer …` per the TrailSplits docs.
+   **There is no public TrailSplits key** — keys are issued only after signing in at <https://trailsplits.com/api/console> (free plan: 30,000 credits/month). For a website/APK, create a *browser* key (`ts_pub_…`) and allow your origins, e.g. `https://<you>.github.io` and `http://127.0.0.1:8765` (the APK); never put a server key in client code. Typical use: a trail search costs 1 credit, opening trail details 3 (relation + elevation), a planned loop 10; weather is free.
+   TrailSplits sometimes passes OSM's `distance` tag (which is in **km**) through as `distance_m`; the app detects that against the route's own extent, so such trails no longer show “0.0 km · ~0 min”. National/international routes that TrailSplits only knows as a short stub (e.g. *Tour Monte Rosa*, really ~160 km) show as “Multi-stage route” instead of a fake 1 km. Times use the DIN 33466 hiking formula (4.2 km/h, 300 m/h up, 500 m/h down) when the climb is known; multi-day treks show days.
 3. **OpenStreetMap** — Overpass + Nominatim as automatic fallbacks for trail data and geocoding. **Open-Meteo** directly if the TrailSplits forecast is unreachable.
+4. **Trail photos** — each card shows a picture of *that* trail: its **Google Maps photo** (matched one-to-one by name — generic words like “walk”/“trail” and the town name don't count), else a freely-licensed **Wikimedia Commons** photo taken within 1.5 km of the trail start (filtered hard: no maps, board games, signs, buildings, portraits…; author + licence credited; never the same photo on two cards), else a **map of the trail's own area** with its start pinned. Photos load lazily as you scroll and are cached for 30 days. On phones the photo sits on top at 16:9; on wider screens in a 200 px column; the details sheet opens with the same photo full-width.
 
 Per-device overrides (Google key, TrailSplits key, AI model) live in the footer's **⚙️ Settings** dialog and are merged over `js/config.js`. If you ever restrict the Google key by HTTP referrer, add your web origin and, for the APK, `http://localhost:8765/*` + `http://127.0.0.1:8765/*`.
 
@@ -59,11 +62,26 @@ node test/dom-check.js                                   # shell + helpers (no d
 npm i jsdom@24 --prefix /tmp/t                           # once
 NODE_PATH=/tmp/t/node_modules node test/assistant-check.js   # Grok tool-calling loop (mocked Puter), maps fallback, tracker
 NODE_PATH=/tmp/t/node_modules node test/tracker-stress.js    # phantom-distance stress test
+cd test/browser && npm install                           # once — headless Chromium
+node test/browser/site-check.mjs                         # real-browser end-to-end: all pages, photos, assistant, GPS, back gesture (106 checks)
+node test/browser/apk-check.mjs                          # the same suite against the site INSIDE the APK, served by the app's LocalServer (110 checks)
 ```
+
+See [`test/browser/README.md`](test/browser/README.md) for what the browser suites cover. All third-party APIs are mocked there (real TrailSplits data in `test/fixtures/`), so they run offline.
 
 ## Android app (APK)
 
-`android/dist/CalledIt-1.2.0.apk` is a ready-to-install build of the native WebView shell around this same website (see [`android/README.md`](android/README.md)). It installs over earlier CalledIt builds (same signing key). v1.2.0:
+`android/dist/CalledIt-1.2.1.apk` is a ready-to-install build of the native WebView shell around this same website (see [`android/README.md`](android/README.md)). It installs over earlier CalledIt builds (same signing key).
+
+v1.2.1 (tested end-to-end: the files inside the APK are served by the app's own `LocalServer` and driven as an Android WebView — 110/110 checks):
+
+* **trail photos fixed** — a real photo of each trail (Google → Wikimedia Commons → trail-area map), full-width 16:9 on phones instead of tall narrow strips, no repeated stock pictures, credits shown; the details sheet opens with the trail's photo
+* **trail lengths fixed** — no more “0.0 km · ~0 min” (km-tagged OSM routes), no fake “1 km” for long-distance tours, realistic times from the climb (DIN 33466)
+* “Near me” / search / hike-bike taps made while an area is still loading are queued instead of silently ignored
+* the assistant's parking/water answers use only the kinds asked for, with readable names for unnamed spots
+* the “Got it” navigation hint no longer swallows taps on **Ask** while it fades out; the empty profile picture no longer shows as a broken image; “📷 Edit” label no longer clipped
+
+v1.2.0:
 
 * **back gesture** goes back through pages/sheets instead of exiting (the manifest no longer opts into `OnBackInvokedCallback`, which on Android 13+ stopped `onBackPressed()` from ever running)
 * **Grok AI works**: Puter's one-time sign-in window opens inside the app (WebView popup support) and hands the login back to the page

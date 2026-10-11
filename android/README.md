@@ -19,18 +19,22 @@ builds with plain `javac`/Gradle and stays tiny.
 
 ## Get the APK
 
-1. **In this repo** — [`android/dist/CalledIt-1.2.0.apk`](dist/CalledIt-1.2.0.apk)
+1. **In this repo** — [`android/dist/CalledIt-1.2.1.apk`](dist/CalledIt-1.2.1.apk)
    (signed with the project's debug key; install via “Install unknown apps” or
    `adb install -r`). It upgrades earlier CalledIt builds in place.
-   *The previous 1.1.0 file was removed: it packaged the web pages in the wrong
+   *The old 1.1.0 file was removed: it packaged the web pages in the wrong
    assets folder and opened to “Not found”.*
+   Tested with `node test/browser/apk-check.mjs`: the APK's bundled files are
+   compared with the repo, served by the app's own `LocalServer` on
+   `http://127.0.0.1:8765` (via `ci/ServeAssets.java`) and driven in Chromium as
+   an Android WebView with the `CalledItAndroid` bridge.
 2. **GitHub Actions** — copy `ci/apk-workflow.yml` to
    `.github/workflows/apk.yml` and every push will build fresh APKs
    (the sandbox token that prepared this repo can’t create workflow files
    itself).
 3. **Locally** — `android/ci/build-apk.sh` builds without Android Studio
    (needs `aapt2`, `d8`, `apksigner`, an `android.jar` and a JVM — or a normal
-   `ANDROID_HOME`; `VERSION_NAME` / `VERSION_CODE` env vars override 1.2.0 / 3),
+   `ANDROID_HOME`; `VERSION_NAME` / `VERSION_CODE` env vars override 1.2.1 / 4),
    and Android Studio can open the `android/` folder directly (Gradle, JDK 17,
    SDK 34):
 

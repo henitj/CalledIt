@@ -89,6 +89,20 @@
     return !!cfg.googleMapsApiKey && cfg.googleMapsApiKey.indexOf('AIza') === 0;
   }
 
+  /* TrailSplits passes OSM's `distance` tag straight through as distance_m for
+     many relations — and that tag is in KILOMETRES (“24.5” = 24.5 km), which
+     made those trails show “0.0 km · ~0 min”. A route can't be shorter than
+     half its own extent, so such values are converted. */
+  function normalizeTrailDistance(d, bbox) {
+    if (typeof d !== 'number' || !isFinite(d) || d <= 0) return null;
+    if (Array.isArray(bbox) && bbox.length === 4) {
+      var span = Math.max(C.haversineM(bbox[1], bbox[0], bbox[3], bbox[0]), C.haversineM(bbox[1], bbox[0], bbox[1], bbox[2]));
+      if (d < span * 0.5 && d * 1000 >= span * 0.5) return d * 1000;
+      return d;
+    }
+    return d < 100 ? d * 1000 : d;
+  }
+
   /* ============================================================
      PROVIDER 1 — TrailSplits
      ============================================================ */
@@ -109,14 +123,28 @@
             id: 'ts-' + p.osm_relation_id,
             osmId: p.osm_relation_id,
             name: String(p.name || 'Unnamed trail'),
+            nameEn: p.name_en || null,
             ref: p.ref || null,
             network: p.network || null,
             routeType: p.route_type || (mode === 'bike' ? 'bicycle' : 'hiking'),
-            distanceM: typeof p.distance_m === 'number' ? p.distance_m : null,
+            distanceM: normalizeTrailDistance(p.distance_m, p.bbox),
+            ascentM: typeof p.ascent_m === 'number' ? p.ascent_m : null,
+            descentM: typeof p.descent_m === 'number' ? p.descent_m : null,
+            bbox: Array.isArray(p.bbox) && p.bbox.length === 4 ? p.bbox : null,
+            description: p.description || null,
             lon: typeof c[0] === 'number' ? c[0] : null,
             lat: typeof c[1] === 'number' ? c[1] : null,
             source: 'TrailSplits'
           };
+        }).map(function (t) {
+          /* a national/international route “1 km long” is an OSM super-relation
+             (e.g. Tour Monte Rosa, ~160 km) of which only a stub is mapped —
+             don’t show a fake length or call it the easiest trail */
+          if ((t.network === 'iwn' || t.network === 'nwn') && t.distanceM != null && t.distanceM < 3000) {
+            t.distanceM = null;
+            t.multiStage = true;
+          }
+          return t;
         }).filter(function (t) { return t.lat != null; });
       });
     },
@@ -377,7 +405,9 @@
               lon: p.location && p.location.longitude,
               address: p.formattedAddress || null,
               gmapsUri: p.googleMapsUri || null,
-              photo: google.photoUrl(p, 800)
+              photo: google.photoUrl(p, 800),
+              photoBy: (p.photos && p.photos[0] && p.photos[0].authorAttributions && p.photos[0].authorAttributions[0] &&
+                p.photos[0].authorAttributions[0].displayName) || null
             };
           }).filter(function (p) { return p.name && p.lat != null; });
         })
@@ -386,27 +416,298 @@
   };
 
   /* Attach the best matching Google place (rating/photo) to each trail. */
+  /* Pair Google places with trails: best name match first, one place per
+     trail and one trail per place (so two cards never share a photo).
+     Generic words (“walk”, “trail”, “weg”…) and the town's own name don't
+     count as a match — “Swiss Top Walk” is not the “5 Lakes Walk”. */
   function attachGoogle() {
     if (!state.googlePlaces.length) return;
-    var stop = ['trail', 'trailhead', 'route', 'path', 'way', 'loop', 'the', 'de', 'la', 'le', 'di', 'da'];
+    var stop = ['trail', 'trails', 'trailhead', 'route', 'path', 'way', 'loop', 'the', 'and', 'walk', 'walks', 'hike', 'hiking',
+      'tour', 'trek', 'weg', 'wanderweg', 'sentier', 'sentiero', 'sendero', 'chemin', 'panorama', 'panoramaweg', 'park', 'swiss',
+      'top', 'nature', 'naturweg', 'de', 'la', 'le', 'di', 'da', 'del', 'des', 'von'];
+    plainWords(state.location.label).forEach(function (w) { if (w.length > 2) stop.push(w); });
     function tokens(s) {
-      return String(s || '').toLowerCase().normalize('NFKD')
-        .replace(/[̀-ͯ]/g, '').split(/[^a-z0-9]+/)
-        .filter(function (w) { return w.length > 2 && stop.indexOf(w) === -1; });
+      return plainWords(s).filter(function (w) { return w.length > 2 && stop.indexOf(w) === -1; });
     }
+    function same(a, b) { return a === b || (a.length >= 5 && b.indexOf(a) === 0) || (b.length >= 5 && a.indexOf(b) === 0); }
+    var pairs = [];
     state.trails.forEach(function (t) {
-      var tt = tokens(t.name);
-      var best = null, bestScore = 0;
+      if (t.source === 'Google Maps') return;
+      t.google = null;
+      var tt = tokens(t.name + ' ' + (t.nameEn || ''));
+      if (!tt.length) return;
       state.googlePlaces.forEach(function (p) {
         var d = C.haversineM(t.lat, t.lon, p.lat, p.lon);
-        if (d > 2500) return;
-        var pt = tokens(p.name);
-        var shared = pt.filter(function (w) { return tt.indexOf(w) !== -1; }).length;
-        var score = shared * 100 - Math.min(d / 25, 40);
-        if (shared > 0 && score > bestScore) { bestScore = score; best = p; }
+        if (d > 3000) return;
+        var shared = tokens(p.name).filter(function (w) { return tt.some(function (x) { return same(w, x); }); }).length;
+        if (shared > 0) pairs.push({ t: t, p: p, score: shared * 100 - Math.min(d / 25, 40) });
       });
-      if (best) t.google = best;
     });
+    pairs.sort(function (a, b) { return b.score - a.score; });
+    var placeTaken = {};
+    pairs.forEach(function (x) {
+      if (x.t.google || placeTaken[x.p.id]) return;
+      x.t.google = x.p;
+      placeTaken[x.p.id] = true;
+    });
+  }
+
+  /* ============================================================
+     TRAIL PHOTOS — every card shows an image of THAT trail:
+       1. its Google Maps photo (when Google knows the trail), else
+       2. a real, freely-licensed photo taken near the trail start
+          (Wikimedia Commons geosearch — filtered hard so board games,
+          maps, signs or buildings never show up; credited; never the
+          same photo on two cards), else
+       3. a small map of the trail’s own area with its start pinned.
+     No more repeating stock pictures. Lookups are lazy (only cards you
+     scroll to) and cached on the device for 30 days.
+     ============================================================ */
+  var PHOTO_CACHE_KEY = 'calledit_photos_v2';
+  var PHOTO_TTL = 30 * 864e5;
+  var photoCache = (function () {
+    try { return JSON.parse(localStorage.getItem(PHOTO_CACHE_KEY) || '{}') || {}; } catch (e) { return {}; }
+  })();
+  var photoCacheTimer = null;
+  function savePhotoCache() {
+    clearTimeout(photoCacheTimer);
+    photoCacheTimer = setTimeout(function () {
+      var keys = Object.keys(photoCache);
+      if (keys.length > 400) {                      /* keep the newest 400 */
+        keys.sort(function (a, b) { return (photoCache[b].at || 0) - (photoCache[a].at || 0); })
+          .slice(400).forEach(function (k) { delete photoCache[k]; });
+      }
+      try { localStorage.setItem(PHOTO_CACHE_KEY, JSON.stringify(photoCache)); } catch (e) { }
+    }, 400);
+  }
+  function photoKey(t) { return t.lat.toFixed(3) + ',' + t.lon.toFixed(3); }
+
+  function plainWords(s) {
+    return String(s || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/\.(jpe?g|png|webp|tiff?|gif)$/, '').split(/[^a-z0-9]+/).filter(Boolean);
+  }
+  var GOOD = ('lake lakes lac lago laghi see seen trail trails path paths sentier sentiero sendero hike hiking wanderweg mountain mountains ' +
+    'peak peaks piz mont monte glacier gletscher valley tal val vallee view views panorama aussicht creek river fluss springs spring falls ' +
+    'waterfall wasserfall cascade forest wald woods park preserve canyon gorge schlucht ridge alp alpe alpine pass summit gipfel hill hills ' +
+    'trailhead greenbelt nature landscape meadow wiese sunset sunrise cliff cliffs overlook bluff dunes prairie wetland marsh bridge ' +
+    'hangebrucke hut hutte cabane rifugio refuge horn berg spitze bach stream pond reservoir lagoon coast beach bay island wilderness ' +
+    'matterhorn jungfrau eiger dolomites rockies sierra appalachian').split(' ');
+  var SUFFIX = ['tal', 'horn', 'berg', 'see', 'gletscher', 'weg', 'wald', 'bach', 'spitze', 'brucke', 'hutte', 'alp', 'alpe', 'pass', 'joch', 'grat'];
+  var BAD = ('map maps karte plan plans logo diagram chart board game games dungeon voting machine poster document screenshot scan flag ' +
+    'coat arms wappen sign signs signpost ticket menu portrait selfie interior inside microscope specimen insect beetle moth spider ' +
+    'fungus plaque memorial grave cemetery tombstone church chapel kirche cathedral hotel restaurant bar cafe shop store building ' +
+    'house street car cars bus tram train trains railway railroad station bahnhof airport aircraft airplane helicopter construction ' +
+    'crane text book page cover newspaper stamp coin banknote advertisement graffiti crowd concert festival parade protest meeting ' +
+    'conference election number sticker label bottle food dish meal logo icon svg drawing sketch painting museum exhibit statue sculpture ' +
+    'swisstopo survey aerial orthophoto satellite hall capitol tower office school university campus hospital stadium mall garage ' +
+    'apartment apartments room lobby kitchen people wedding dog cat portrait headshot').split(' ');
+  var STOP = ['the', 'and', 'trail', 'weg', 'route', 'tour', 'stage', 'tappa', 'via', 'chemin', 'des', 'del', 'della', 'von', 'zum', 'zur'];
+
+  function scoreCommons(info, title, t) {
+    if (!info || !/^image\/(jpeg|webp)$/.test(info.mime || '')) return -99;
+    var words = plainWords(title.replace(/^File:/i, ''));
+    var score = 0, good = 0;
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i];
+      if (BAD.indexOf(w) !== -1) score -= 10;
+      if (GOOD.indexOf(w) !== -1) good++;
+      else for (var j = 0; j < SUFFIX.length; j++) {
+        if (w.length >= SUFFIX[j].length + 3 && w.slice(-SUFFIX[j].length) === SUFFIX[j]) { good++; break; }
+      }
+    }
+    score += Math.min(2, good) * 3;
+    /* words from the trail’s own name or the area name */
+    var name = plainWords(t.name + ' ' + (t.nameEn || '')).filter(function (w) { return w.length >= 4 && STOP.indexOf(w) === -1; });
+    var area = plainWords(state.location.label).filter(function (w) { return w.length >= 4; });
+    var nameHit = name.some(function (n) { return words.some(function (w) { return w === n || (n.length >= 5 && w.indexOf(n) === 0) || (w.length >= 5 && n.indexOf(w) === 0); }); });
+    if (!good && !nameHit) return -5;            /* must show nature/trail — or be named after this trail */
+    if (nameHit) score += 3;
+    if (area.some(function (a) { return words.indexOf(a) !== -1; })) score += 2;
+    var wpx = info.width || 0, hpx = info.height || 0;
+    if (wpx >= hpx * 1.2) score += 1;            /* landscape suits the cards */
+    if (hpx > wpx * 1.1) score -= 2;             /* portrait crops badly */
+    if (wpx && wpx < 900) score -= 2;
+    return score;
+  }
+
+  function stripTags(html) {
+    var d = document.createElement('div');
+    d.innerHTML = String(html || '');
+    return (d.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  /* concurrency-limited queue for photo lookups (be gentle with Commons) */
+  var photoQueue = [], photoActive = 0;
+  function enqueuePhoto(job) {
+    photoQueue.push(job);
+    pumpPhotos();
+  }
+  function pumpPhotos() {
+    while (photoActive < 2 && photoQueue.length) {
+      var job = photoQueue.shift();
+      photoActive++;
+      Promise.resolve().then(job).catch(function () { }).then(function () { photoActive--; pumpPhotos(); });
+    }
+  }
+
+  var commonsPending = {};
+  function commonsCandidates(t) {
+    var key = photoKey(t);
+    var hit = photoCache[key];
+    if (hit && Date.now() - hit.at < PHOTO_TTL) return Promise.resolve(hit.c || []);
+    if (commonsPending[key]) return commonsPending[key];
+    var url = 'https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*' +
+      '&generator=geosearch&ggscoord=' + t.lat.toFixed(5) + '%7C' + t.lon.toFixed(5) + '&ggsradius=1500&ggsnamespace=6&ggslimit=20' +
+      '&prop=imageinfo&iiprop=url%7Csize%7Cmime%7Cextmetadata&iiextmetadatafilter=Artist%7CLicenseShortName&iiurlwidth=640';
+    commonsPending[key] = new Promise(function (resolve) {
+      enqueuePhoto(function () {
+        return fetchJSON(url, null, 9000).then(function (json) {
+          var pages = (json && json.query && json.query.pages) || {};
+          var list = Object.keys(pages).map(function (id) {
+            var p = pages[id], info = p.imageinfo && p.imageinfo[0];
+            if (!info || !info.thumburl) return null;
+            var md = info.extmetadata || {};
+            return {
+              id: p.pageid, s: scoreCommons(info, p.title || '', t), i: typeof p.index === 'number' ? p.index : 99,
+              src: info.thumburl, link: info.descriptionurl || '',
+              by: stripTags(md.Artist && md.Artist.value).slice(0, 40), lic: stripTags(md.LicenseShortName && md.LicenseShortName.value).slice(0, 20)
+            };
+          }).filter(function (c) { return c && c.s >= 3; })
+            .sort(function (a, b) { return (b.s - a.s) || (a.i - b.i); })
+            .slice(0, 6)
+            .map(function (c) { return { id: c.id, src: c.src, link: c.link, by: c.by, lic: c.lic }; });
+          photoCache[key] = { at: Date.now(), c: list };
+          savePhotoCache();
+          resolve(list);
+        }).catch(function () { resolve([]); });        /* offline etc. — not cached, retried next time */
+      });
+    });
+    commonsPending[key].then(function () { delete commonsPending[key]; });
+    return commonsPending[key];
+  }
+
+  /* ---------- rendering helpers ---------- */
+  var usedPhotoIds = {};                              /* Commons photo id → trail id (no duplicates on the page) */
+  function googleCredit(g) {
+    return g && g.photoBy ? 'Photo: ' + g.photoBy + ' · Google Maps' : 'Photo · Google Maps';
+  }
+
+  function setPhoto(box, src, credit, link, onFail) {
+    box.innerHTML = '<span class="photo-skeleton"></span>';
+    var img = document.createElement('img');
+    img.className = 'trail-photo';
+    img.alt = '';
+    img.decoding = 'async';
+    img.referrerPolicy = 'no-referrer';
+    img.addEventListener('load', function () {
+      img.classList.add('is-in');
+      var sk = box.querySelector('.photo-skeleton');
+      setTimeout(function () { if (sk && sk.parentNode) sk.parentNode.removeChild(sk); }, 400);
+    });
+    img.addEventListener('error', function () { if (onFail) onFail(); });
+    img.src = src;
+    box.appendChild(img);
+    if (credit) {
+      var c = document.createElement(link ? 'a' : 'span');
+      c.className = 'photo-credit';
+      c.textContent = credit;
+      if (link) { c.href = link; c.target = '_blank'; c.rel = 'noopener'; }
+      box.appendChild(c);
+    }
+    box.dataset.kind = 'photo';
+  }
+
+  /* Web-Mercator tile mosaic of the trail’s area, sized to the box, start pinned */
+  function lon2x(lon, z) { return (lon + 180) / 360 * 256 * Math.pow(2, z); }
+  function lat2y(lat, z) {
+    var s = Math.sin(lat * Math.PI / 180);
+    return (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * 256 * Math.pow(2, z);
+  }
+  function setMapThumb(box, t) {
+    var r = box.getBoundingClientRect();
+    var W = Math.max(160, Math.round(r.width || 360)), H = Math.max(110, Math.round(r.height || 200));
+    var cLat = t.lat, cLon = t.lon, z = 14;
+    var bb = t.bbox;
+    if (bb && bb.length === 4 && bb[2] > bb[0] && bb[3] > bb[1]) {
+      cLon = (bb[0] + bb[2]) / 2; cLat = (bb[1] + bb[3]) / 2;
+      for (z = 15; z > 10; z--) {                 /* zoom that fits the whole route */
+        if (lon2x(bb[2], z) - lon2x(bb[0], z) <= W * 0.85 && lat2y(bb[1], z) - lat2y(bb[3], z) <= H * 0.85) break;
+      }
+    }
+    var cx = lon2x(cLon, z), cy = lat2y(cLat, z);
+    var x0 = cx - W / 2, y0 = cy - H / 2;
+    var retina = (window.devicePixelRatio || 1) > 1.4 ? '@2x' : '';
+    var html = '';
+    for (var tx = Math.floor(x0 / 256); tx <= Math.floor((x0 + W) / 256); tx++) {
+      for (var ty = Math.floor(y0 / 256); ty <= Math.floor((y0 + H) / 256); ty++) {
+        var n = Math.pow(2, z), wx = ((tx % n) + n) % n;
+        var sub = 'abcd'.charAt((wx + ty) % 4);
+        html += '<img class="tile" alt="" draggable="false" referrerpolicy="no-referrer" style="left:' + Math.round(tx * 256 - x0) + 'px;top:' + Math.round(ty * 256 - y0) + 'px" ' +
+          'src="https://' + sub + '.basemaps.cartocdn.com/rastertiles/voyager/' + z + '/' + wx + '/' + ty + retina + '.png">';
+      }
+    }
+    var px = lon2x(t.lon, z) - x0, py = lat2y(t.lat, z) - y0;
+    box.innerHTML = '<div class="map-thumb">' + html +
+      '<span class="map-thumb__pin" style="left:' + Math.round(px) + 'px;top:' + Math.round(py) + 'px">' +
+      '<svg viewBox="0 0 24 32" width="26" height="34" aria-hidden="true"><path d="M12 1C6 1 1.5 5.4 1.5 11.3 1.5 19 12 31 12 31s10.5-12 10.5-19.7C22.5 5.4 18 1 12 1z" fill="#16a34a" stroke="#fff" stroke-width="2"/><circle cx="12" cy="11.5" r="4" fill="#fff"/></svg></span>' +
+      '<span class="map-thumb__tag">' + (state.mode === 'bike' ? 'Route area' : 'Trail area') + '</span></div>' +
+      '<span class="photo-credit">© OpenStreetMap · CARTO</span>';
+    box.dataset.kind = 'map';
+  }
+
+  /* Fill one media box for trail t (card thumbnail or details hero). */
+  function fillTrailMedia(box, t) {
+    if (!box || box.dataset.filled === '1') return;
+    box.dataset.filled = '1';
+    var fallback = function () { setMapThumb(box, t); };
+    if (t.google && t.google.photo) {
+      setPhoto(box, t.google.photo, googleCredit(t.google), t.google.gmapsUri, function () { tryCommons(); });
+      return;
+    }
+    tryCommons();
+    function tryCommons() {
+      box.innerHTML = '<span class="photo-skeleton"></span>';
+      var done = false;
+      var timer = setTimeout(function () { if (!done) { done = true; fallback(); } }, 7000);
+      commonsCandidates(t).then(function (list) {
+        if (done) {                                 /* map already shown — upgrade if a photo turned up */
+          if (!list.length || box.dataset.kind !== 'map') return;
+        }
+        done = true;
+        clearTimeout(timer);
+        var pick = null;
+        for (var i = 0; i < list.length; i++) {
+          var owner = usedPhotoIds[list[i].id];
+          if (!owner || owner === t.id) { pick = list[i]; break; }
+        }
+        if (!pick) { fallback(); return; }
+        usedPhotoIds[pick.id] = t.id;
+        var credit = '📷 ' + (pick.by || 'Wikimedia Commons') + (pick.lic ? ' · ' + pick.lic : '');
+        setPhoto(box, pick.src, credit, pick.link, function () { delete usedPhotoIds[pick.id]; fallback(); });
+      });
+    }
+  }
+
+  /* lazy: fill boxes as they approach the viewport */
+  var mediaObserver = ('IntersectionObserver' in window) ? new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (!e.isIntersecting) return;
+      mediaObserver.unobserve(e.target);
+      var t = trailById(e.target.dataset.trail);
+      if (t) fillTrailMedia(e.target, t);
+    });
+  }, { rootMargin: '300px 0px' }) : null;
+
+  function observeMedia(root) {
+    qsa('.trail-media[data-trail]', root).forEach(function (box) {
+      if (mediaObserver) mediaObserver.observe(box);
+      else { var t = trailById(box.dataset.trail); if (t) fillTrailMedia(box, t); }
+    });
+  }
+
+  function trailById(id) {
+    for (var i = 0; i < state.trails.length; i++) if (state.trails[i].id === id) return state.trails[i];
+    return null;
   }
 
   /* ============================================================
@@ -1132,15 +1433,19 @@
     if (!places.length) { els.highlights.hidden = true; return; }
     els.highlights.hidden = false;
     els.highlightsRow.innerHTML = places.map(function (p, i) {
-      var img = p.photo || cfg.fallbackImages[i % cfg.fallbackImages.length];
       var href = p.gmapsUri || ('https://www.google.com/maps/search/?api=1&query=' + p.lat + ',' + p.lon);
       return '<a class="hl-card" href="' + esc(href) + '" target="_blank" rel="noopener">' +
-        '<img src="' + esc(img) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src=\'' + cfg.fallbackImages[i % cfg.fallbackImages.length] + '\'">' +
+        '<div class="hl-media" data-hl="' + i + '"></div>' +
         '<div class="hl-body">' +
         '<div class="hl-name">' + esc(p.name) + '</div>' +
         '<div class="hl-rating">★ ' + p.rating.toFixed(1) + ' · ' + p.count.toLocaleString() + ' reviews</div>' +
         '</div></a>';
     }).join('');
+    qsa('.hl-media', els.highlightsRow).forEach(function (box) {
+      var p = places[+box.dataset.hl];
+      if (p.photo) setPhoto(box, p.photo, p.photoBy ? p.photoBy + ' · Google' : 'Google', null, function () { setMapThumb(box, p); });
+      else setMapThumb(box, p);
+    });
   }
 
   /* ============================================================
@@ -1148,11 +1453,6 @@
      ============================================================ */
   function networkLabel(n) {
     return { iwn: 'International', nwn: 'National', rwn: 'Regional', lwn: 'Local' }[n] || null;
-  }
-
-  function trailImg(t, i) {
-    if (t.google && t.google.photo) return t.google.photo;
-    return cfg.fallbackImages[(i + (t.name.length % 3)) % cfg.fallbackImages.length];
   }
 
   function filteredTrails() {
@@ -1174,52 +1474,65 @@
     if (!state.loading && !list.length) {
       els.trailList.innerHTML =
         '<div class="empty-state"><p><b>No ' + (state.mode === 'bike' ? 'signed biking routes' : 'signed hiking trails') + ' found here.</b></p>' +
-        '<p style="margin-top:8px">Try a bigger nearby town, or search another place above.</p></div>';
+        '<p style="margin-top:8px">Try a bigger nearby town, search another place above, or ask the assistant to plan a loop.</p></div>';
       return;
     }
-    els.trailList.innerHTML = list.map(function (t, i) {
-      var km = t.distanceM != null ? C.fmtBoth(t.distanceM) : 'length unlisted';
+    els.trailList.innerHTML = list.map(function (t) {
+      var km = t.distanceM != null ? C.fmtBoth(t.distanceM) : (t.multiStage ? 'Multi-stage route' : 'length unlisted');
       var mins = estimateMinutes(t);
       var chips = [];
       var net = networkLabel(t.network);
       if (net) chips.push('<span class="chip chip--grey">' + net + '</span>');
       if (t.ref) chips.push('<span class="chip chip--grey">Ref ' + esc(t.ref) + '</span>');
+      if (t.ascentM) chips.push('<span class="chip chip--grey" title="Total climb">↑ ' + Math.round(t.ascentM) + ' m</span>');
       var rating = '';
       if (t.google && t.google.rating != null) {
         rating = '<span class="trail-card__rating"><span class="stars" aria-label="' + t.google.rating + ' out of 5 stars">' + C.stars(t.google.rating) + '</span>' +
           t.google.rating.toFixed(1) + ' (' + t.google.count.toLocaleString() + ')' +
           '<span class="g-src">· Google</span></span>';
       }
-      var links = C.directionsLinks(t.lat, t.lon);
-      var dirLinks = links.map(function (l) {
-        return '<a class="btn btn-sm ' + (l.primary ? 'btn-primary' : 'btn-ghost') + '" href="' + esc(l.href) + '" target="_blank" rel="noopener">' + esc(l.label) + '</a>';
-      }).join('');
+      var dir = C.directionsLinks(t.lat, t.lon)[0];
       return '<article class="trail-card" data-id="' + esc(t.id) + '">' +
-        '<img class="trail-card__img" src="' + esc(trailImg(t, i)) + '" alt="" loading="lazy" referrerpolicy="no-referrer" ' +
-        'onerror="this.onerror=null;this.src=\'' + cfg.fallbackImages[i % cfg.fallbackImages.length] + '\'">' +
+        '<div class="trail-card__media trail-media" data-trail="' + esc(t.id) + '" role="button" tabindex="-1" aria-label="Details for ' + esc(t.name) + '">' +
+        '<span class="photo-skeleton"></span></div>' +
         '<div class="trail-card__body">' +
         '<h3 class="trail-card__name">' + esc(t.name) + '</h3>' +
         '<div class="trail-card__meta"><span>' + esc(km) + (mins ? ' · ' + C.fmtDuration(mins) : '') + '</span>' + chips.join('') + '</div>' +
         rating +
         '<div class="trail-card__actions">' +
         '<button class="btn btn-sm btn-soft" type="button" data-details="' + esc(t.id) + '">Details</button>' +
-        dirLinks +
+        '<a class="btn btn-sm btn-primary" href="' + esc(dir.href) + '" target="_blank" rel="noopener">Directions</a>' +
         '</div>' +
         '</div></article>';
     }).join('');
 
     qsa('[data-details]', els.trailList).forEach(function (btn) {
       btn.addEventListener('click', function () {
-        var t = state.trails.filter(function (x) { return x.id === btn.dataset.details; })[0];
+        var t = trailById(btn.dataset.details);
         if (t) openDetails(t);
       });
     });
+    qsa('.trail-card__media', els.trailList).forEach(function (box) {
+      box.addEventListener('click', function (e) {
+        if (e.target.closest && e.target.closest('.photo-credit')) return;   /* credit links open the source */
+        var t = trailById(box.dataset.trail);
+        if (t) openDetails(t);
+      });
+    });
+    observeMedia(els.trailList);
   }
 
+  /* Hiking time: DIN 33466 (the Swiss/German trail-sign formula) when the
+     climb is known — 4.2 km/h on the flat, 300 m/h up, 500 m/h down;
+     biking: ~15 km/h plus 6 min per 100 m of climb. */
   function estimateMinutes(t) {
     if (t.distanceM == null) return null;
-    var kmh = state.mode === 'bike' ? 14 : 4.4;
-    return (t.distanceM / 1000) / kmh * 60;
+    var km = t.distanceM / 1000;
+    if (state.mode === 'bike') return km / 15 * 60 + (t.ascentM ? t.ascentM / 100 * 6 : 0);
+    var horiz = km / 4.2;
+    if (t.ascentM == null && t.descentM == null) return horiz * 60;
+    var vert = (t.ascentM || 0) / 300 + (t.descentM || 0) / 500;
+    return (Math.max(horiz, vert) + Math.min(horiz, vert) / 2) * 60;
   }
 
   function renderErrors(errors) {
@@ -1252,9 +1565,21 @@
   /* ============================================================
      Loading an area
      ============================================================ */
+  /* A newer request (Near me, a search, the hike/bike switch, the assistant)
+     that arrives while an area is still loading used to be dropped silently
+     — e.g. tapping “Near me” right after opening the page did nothing. Now
+     the latest one waits and runs as soon as the current load finishes. */
+  var pendingArea = null;
   function loadArea(lat, lon, label, guessed) {
-    if (state.loading) return Promise.resolve();
+    if (state.loading) {
+      return new Promise(function (resolve) {
+        if (pendingArea) pendingArea.resolve();            /* superseded by this one */
+        pendingArea = { args: [lat, lon, label, guessed], resolve: resolve };
+        els.statusLine.textContent = 'Loading ' + (label || 'that area') + ' next…';
+      });
+    }
     state.loading = true;
+    usedPhotoIds = {};
     state.location = { lat: lat, lon: lon, label: label, guessed: !!guessed };
     els.trailList.innerHTML = '<div class="loading-state"><p class="loading-dots">Finding ' + (state.mode === 'bike' ? 'biking routes' : 'hiking trails') + '</p></div>';
     renderStatus();
@@ -1273,6 +1598,11 @@
 
     return Promise.all([trailsP, placesP, weatherP]).then(function () {
       state.loading = false;
+      if (pendingArea) {                                    /* someone asked for another area meanwhile */
+        var next = pendingArea;
+        pendingArea = null;
+        return loadArea.apply(null, next.args).then(next.resolve);
+      }
       addGooglePlacesAsTrails();
       renderErrors(state.trails.length ? [] : ['No trails could be loaded here — the trail services may be unreachable, or nothing is mapped nearby. Try a bigger nearby town, or ask the assistant to plan a loop.']);
       renderAll();
@@ -1354,6 +1684,7 @@
       : '<span class="muted">No Google rating for this route yet</span>';
 
     els.modalBody.innerHTML =
+      '<div class="modal-hero trail-media" data-trail="' + esc(t.id) + '"><span class="photo-skeleton"></span></div>' +
       '<h2 id="modalTitle">' + esc(t.name) + '</h2>' +
       '<div class="trail-card__meta">' +
       '<span class="chip">' + (t.routeType === 'bicycle' || t.routeType === 'mtb' ? '🚴 Biking route' : '🥾 Hiking trail') + '</span>' +
@@ -1362,11 +1693,13 @@
       '<span class="chip chip--grey">via ' + esc(t.source) + (t.osmId ? ' · OSM relation ' + t.osmId : '') + '</span>' +
       '</div>' +
       '<div class="fact-grid" id="factGrid">' +
-      '<div class="fact"><div class="k">Length</div><div class="v">' + (t.distanceM != null ? C.fmtBoth(t.distanceM) : 'unlisted') + '</div></div>' +
+      '<div class="fact"><div class="k">Length</div><div class="v">' + (t.distanceM != null ? C.fmtBoth(t.distanceM) : (t.multiStage ? 'multi-stage' : 'unlisted')) + '</div></div>' +
       '<div class="fact"><div class="k">Typical time</div><div class="v">' + C.fmtDuration(estimateMinutes(t)) + '</div></div>' +
-      '<div class="fact"><div class="k">Climb</div><div class="v" id="factClimb">…</div></div>' +
+      '<div class="fact"><div class="k">Climb</div><div class="v" id="factClimb">' +
+        (t.ascentM != null ? '↑ ' + Math.round(t.ascentM) + ' m' + (t.descentM != null ? ' · ↓ ' + Math.round(t.descentM) + ' m' : '') : '…') + '</div></div>' +
       '</div>' +
       '<p>' + rating + '</p>' +
+      (t.description ? '<p class="muted" style="font-size:.9rem">' + esc(t.description) + '</p>' : '') +
       '<div class="modal__section" id="elevSection" hidden>' +
       '<h3>Elevation profile</h3>' +
       '<svg class="elev-chart" id="elevChart" role="img" aria-label="Elevation profile chart"></svg>' +
@@ -1382,6 +1715,7 @@
 
     els.backdrop.classList.add('is-open');
     document.body.style.overflow = 'hidden';
+    fillTrailMedia(qs('.modal-hero', els.modalBody), t);
     /* Android back gesture / back button closes this modal (not the app) */
     C.pushOverlay('details', hideModalVisual);
 
@@ -1390,7 +1724,9 @@
       ts.relation(t.osmId).then(function (rel) {
         var props = rel.properties || {};
         var climb = qs('#factClimb');
-        if (climb && typeof props.ascent_m === 'number') climb.textContent = '↑ ' + Math.round(props.ascent_m) + ' m';
+        if (climb && typeof props.ascent_m === 'number') {
+          climb.textContent = '↑ ' + Math.round(props.ascent_m) + ' m' + (typeof props.descent_m === 'number' ? ' · ↓ ' + Math.round(props.descent_m) + ' m' : '');
+        }
         if (rel.geometry) {
           return ts.elevationProfile(rel.geometry)
             .catch(function () { return ts.elevationSample(rel.geometry); })
@@ -1741,6 +2077,8 @@
       from_area_center_km: round1(C.haversineM(state.location.lat, state.location.lon, t.lat, t.lon) / 1000)
     };
     if (t.google && t.google.rating != null) { o.google_rating = t.google.rating; o.google_reviews = t.google.count; }
+    if (t.ascentM != null) o.climb_up_m = Math.round(t.ascentM);
+    if (t.descentM != null) o.climb_down_m = Math.round(t.descentM);
     if (t.network) o.network = networkLabel(t.network) || t.network;
     if (t.ref) o.ref = t.ref;
     o.source = t.source;
@@ -1833,7 +2171,7 @@
         });
         if (typeof p.ascent_m === 'number') out.climb_up_m = Math.round(p.ascent_m);
         if (typeof p.descent_m === 'number') out.climb_down_m = Math.round(p.descent_m);
-        if (typeof p.distance_m === 'number' && t.distanceM == null) out.length = kmMi(p.distance_m);
+        if (typeof p.distance_m === 'number' && t.distanceM == null) out.length = kmMi(normalizeTrailDistance(p.distance_m, p.bbox));
         return out;
       }).catch(function () { return out; });
     },
@@ -1906,16 +2244,25 @@
       var apiKinds = kinds.concat(kinds.indexOf('water') !== -1 ? ['drinking_water'] : []);
       var url = cfg.trailsplitsApi + '/pois/v1/bbox?min_lat=' + (lat - dLat).toFixed(5) + '&max_lat=' + (lat + dLat).toFixed(5) +
         '&min_lon=' + (lon - dLon).toFixed(5) + '&max_lon=' + (lon + dLon).toFixed(5) + '&limit=300&kind=' + encodeURIComponent(apiKinds.join(','));
+      var KIND_LABEL = { parking: 'car park', water: 'drinking water', drinking_water: 'drinking water', toilets: 'toilets',
+        shelter: 'shelter', viewpoint: 'viewpoint', picnic_site: 'picnic spot', alpine_hut: 'mountain hut', bus_stop: 'bus stop' };
       return getJSONsmart(url, 15000).then(function (json) {
-        var feats = (json && json.features) || [];
+        var feats = ((json && json.features) || []).filter(function (f) {
+          return f && typeof f.lat === 'number' && typeof f.lon === 'number' && apiKinds.indexOf(f.kind) !== -1;
+        });
         var list = feats.map(function (f) {
-          return { kind: f.kind, name: f.name || null, km_away: round1(C.haversineM(lat, lon, f.lat, f.lon) / 1000), lat: f.lat, lon: f.lon };
+          var kind = f.kind === 'drinking_water' ? 'water' : f.kind;
+          return { kind: kind, name: f.name || ('unnamed ' + (KIND_LABEL[f.kind] || f.kind)), km_away: round1(C.haversineM(lat, lon, f.lat, f.lon) / 1000), lat: f.lat, lon: f.lon };
         }).sort(function (x, y) { return x.km_away - y.km_away; });
-        var byKind = {};
-        list.forEach(function (p) { byKind[p.kind] = (byKind[p.kind] || 0) + 1; });
+        var byKind = {}, nearestEach = {};
+        list.forEach(function (p) {
+          byKind[p.kind] = (byKind[p.kind] || 0) + 1;
+          if (!nearestEach[p.kind]) nearestEach[p.kind] = { name: p.name, km_away: p.km_away };
+        });
         return {
           around: t ? t.name + ' (trail start)' : state.location.label, radius_km: r,
-          counts: byKind, nearest: list.slice(0, 15).map(function (p) { return { kind: p.kind, name: p.name, km_away: p.km_away }; }),
+          counts: byKind, nearest_each: nearestEach,
+          nearest: list.slice(0, 15).map(function (p) { return { kind: p.kind, name: p.name, km_away: p.km_away }; }),
           note: 'Mapped OpenStreetMap features — not a guarantee they are open or working.'
         };
       }).catch(function (e) { return { error: 'Places lookup failed: ' + errText(e) }; });

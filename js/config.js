@@ -54,14 +54,11 @@ window.CALLEDIT_CONFIG = {
   nominatim: 'https://nominatim.openstreetmap.org',
 
   /* Where to show trails when the user hasn't shared a location or searched yet */
-  defaultLocation: { lat: 46.0207, lon: 7.7491, label: 'Zermatt, Switzerland' },
+  defaultLocation: { lat: 46.0207, lon: 7.7491, label: 'Zermatt, Switzerland' }
 
-  /* Local photos used whenever a trail has no Google photo available */
-  fallbackImages: [
-    'assets/fallback-forest.jpg',
-    'assets/fallback-lake.jpg',
-    'assets/fallback-ridge.jpg'
-  ]
+  /* Trail photos: Google Maps photo → freely-licensed Wikimedia Commons photo
+     taken near the trail → a map of the trail's area (see js/trails.js,
+     “TRAIL PHOTOS”). No stock pictures, so no two trails look the same. */
 };
 
 /* Merge per-device overrides saved in Settings over the defaults above. */

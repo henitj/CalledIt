@@ -37,6 +37,7 @@
     if (mins == null || isNaN(mins)) return '—';
     mins = Math.round(mins);
     if (mins < 60) return '~' + mins + ' min';
+    if (mins >= 16 * 60) return '~' + Math.ceil(mins / 390) + ' days';   /* ~6.5 h on the move per day */
     var h = Math.floor(mins / 60), r = mins % 60;
     return '~' + h + ' h' + (r ? ' ' + r + ' min' : '');
   }

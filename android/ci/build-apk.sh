@@ -22,8 +22,8 @@ DIST="$AND/dist"
 JAVA="${JAVA:-java}"
 AAPT2="${AAPT2:-${ANDROID_HOME:-}/build-tools/34.0.0/aapt2}"
 ANDROID_JAR="${ANDROID_JAR:-${ANDROID_HOME:-}/platforms/android-34/android.jar}"
-VERSION_NAME="${VERSION_NAME:-1.2.0}"
-VERSION_CODE="${VERSION_CODE:-3}"
+VERSION_NAME="${VERSION_NAME:-1.2.1}"
+VERSION_CODE="${VERSION_CODE:-4}"
 
 mkdir -p "$BUILD" "$DIST"
 rm -rf "$BUILD"/* 

@@ -28,6 +28,11 @@ jobs:
           NODE_PATH=/tmp/t/node_modules node test/assistant-check.js
           NODE_PATH=/tmp/t/node_modules node test/tracker-stress.js
 
+      - name: Browser end-to-end tests (website)
+        run: |
+          npm i --no-save --prefix test/browser puppeteer-core@25
+          CHROME_PATH="$(command -v google-chrome || command -v chromium)" node test/browser/site-check.mjs
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -36,7 +41,7 @@ jobs:
 
       - name: LocalServer JVM test
         run: |
-          javac -source 1.8 -target 1.8 -d /tmp/ls android/app/src/main/java/com/calledit/app/LocalServer.java android/ci/LocalServerTest.java
+          javac -source 1.8 -target 1.8 -d /tmp/ls android/app/src/main/java/com/calledit/app/LocalServer.java android/ci/LocalServerTest.java android/ci/ServeAssets.java
           java -cp /tmp/ls com.calledit.app.LocalServerTest .
 
       - name: Set up Gradle
@@ -47,6 +52,9 @@ jobs:
       - name: Build APKs
         working-directory: android
         run: gradle assembleDebug assembleRelease
+
+      - name: APK end-to-end test (site inside the APK, served by the app's LocalServer)
+        run: CHROME_PATH="$(command -v google-chrome || command -v chromium)" node test/browser/apk-check.mjs android/app/build/outputs/apk/debug/*.apk
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4

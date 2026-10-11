@@ -281,6 +281,26 @@
     BODY.appendChild(f);
   }
 
+  /* ---------------- soft-keyboard watchdog ----------------
+     When the on-screen keyboard opens (phones + WebView APKs), the fixed
+     bottom bars would cover the input or get pushed around. We detect the
+     viewport shrink and switch to keyboard mode (see .kb-open in CSS). */
+  function watchKeyboard() {
+    if (!window.visualViewport) return;
+    var open = false;
+    function apply() {
+      var vv = window.visualViewport;
+      var kb = vv.height < window.innerHeight * 0.72;
+      if (kb !== open) {
+        open = kb;
+        BODY.classList.toggle('kb-open', open);
+      }
+    }
+    window.visualViewport.addEventListener('resize', apply);
+    window.visualViewport.addEventListener('scroll', apply);
+  }
+  watchKeyboard();
+
   /* ---------------- boot ---------------- */
   var page = BODY.dataset.page || 'home';
   buildHeader(page);

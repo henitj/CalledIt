@@ -4,6 +4,11 @@
   var C = window.CalledIt;
 
   /* accordion */
+  function recalcOpenPanels() {
+    C.qsa('.accordion__item.is-open .accordion__panel').forEach(function (p) {
+      p.style.maxHeight = p.scrollHeight + 'px';
+    });
+  }
   C.qsa('.accordion__item').forEach(function (item) {
     var btn = C.qs('.accordion__btn', item);
     var panel = C.qs('.accordion__panel', item);
@@ -13,6 +18,9 @@
       panel.style.maxHeight = open ? panel.scrollHeight + 'px' : '0px';
     });
   });
+  /* heights can shift once fonts/images arrive or the window resizes */
+  window.addEventListener('resize', recalcOpenPanels);
+  window.addEventListener('load', recalcOpenPanels);
 
   /* remember mode so the trails page opens in the right one */
   C.qsa('.mode-card').forEach(function (card) {

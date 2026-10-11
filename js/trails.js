@@ -58,6 +58,16 @@
     });
   }
 
+  /* GET that survives CORS-blocked endpoints: try direct first, then a
+     public CORS proxy (api.allorigins.win). Keeps TrailSplits/weather working
+     even where the provider hasn't enabled cross-origin browser calls. */
+  function getJSONsmart(url, timeoutMs) {
+    return fetchJSON(url, null, timeoutMs).catch(function () {
+      var proxied = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
+      return fetchJSON(proxied, null, (timeoutMs || 12000) + 8000);
+    });
+  }
+
   function hasGoogleKey() {
     return !!cfg.googleMapsApiKey && cfg.googleMapsApiKey.indexOf('AIza') === 0;
   }
@@ -73,7 +83,7 @@
         '?min_lat=' + (lat - dLat).toFixed(5) + '&min_lng=' + (lon - dLon).toFixed(5) +
         '&max_lat=' + (lat + dLat).toFixed(5) + '&max_lng=' + (lon + dLon).toFixed(5) +
         '&type=' + (mode === 'bike' ? 'bicycle' : 'hiking') + '&limit=80';
-      return fetchJSON(url).then(function (json) {
+      return getJSONsmart(url, 12000).then(function (json) {
         if (!json || !Array.isArray(json.features)) throw new Error('bad trails payload');
         return json.features.map(function (f) {
           var p = f.properties || {};
@@ -95,7 +105,7 @@
     },
 
     relation: function (osmId) {
-      return fetchJSON(cfg.trailsplitsApi + '/trails/v1/relation/' + encodeURIComponent(osmId));
+      return getJSONsmart(cfg.trailsplitsApi + '/trails/v1/relation/' + encodeURIComponent(osmId));
     },
 
     elevationProfile: function (geometry) {
@@ -106,8 +116,44 @@
       });
     },
 
+    /* fallback elevation: sampled terrain heights via GET elevation sampler */
+    elevationSample: function (geometry) {
+      var pts = sampleGeometryPoints(geometry, 100);
+      if (pts.length < 2) return Promise.reject(new Error('no points'));
+      var q = pts.map(function (p) { return p[0].toFixed(5) + ',' + p[1].toFixed(5); }).join('|');
+      return getJSONsmart(cfg.trailsplitsApi + '/tiles/v1/elevation/current/sample?z=12&points=' + encodeURIComponent(q))
+        .then(function (json) {
+          if (!json || !Array.isArray(json.points)) throw new Error('bad elevation payload');
+          /* build a synthetic elevation-profile-shaped response */
+          var dist = 0, series = [], prev = null;
+          var values = [];
+          for (var i = 0; i < json.points.length; i++) {
+            if (prev) dist += C.haversineM(prev[0], prev[1], json.points[i].lat, json.points[i].lon);
+            prev = [json.points[i].lat, json.points[i].lon];
+            if (json.points[i].elevation_m != null) {
+              series.push([dist, json.points[i].elevation_m]);
+              values.push(json.points[i].elevation_m);
+            }
+          }
+          if (series.length < 2) throw new Error('no heights');
+          var asc = 0, desc = 0;
+          for (var j = 1; j < series.length; j++) {
+            var d = series[j][1] - series[j - 1][1];
+            if (d > 0) asc += d; else desc -= d;
+          }
+          return {
+            series: { columns: ['distance_m', 'elevation_m'], points: series },
+            elevation: {
+              source: 'terrain', method: 'sampled',
+              ascent_m: Math.round(asc), descent_m: Math.round(desc),
+              min_m: Math.min.apply(null, values), max_m: Math.max.apply(null, values)
+            }
+          };
+        });
+    },
+
     geocode: function (q) {
-      return fetchJSON(cfg.trailsplitsApi + '/search/v1/forward?q=' + encodeURIComponent(q) + '&limit=1')
+      return getJSONsmart(cfg.trailsplitsApi + '/search/v1/forward?q=' + encodeURIComponent(q) + '&limit=1')
         .then(function (json) {
           var f = json && json.features && json.features[0];
           if (!f || !f.center) throw new Error('not found');
@@ -116,7 +162,7 @@
     },
 
     reverse: function (lat, lon) {
-      return fetchJSON(cfg.trailsplitsApi + '/search/v1/reverse?lat=' + lat + '&lon=' + lon + '&limit=1&radius_m=30000')
+      return getJSONsmart(cfg.trailsplitsApi + '/search/v1/reverse?lat=' + lat + '&lon=' + lon + '&limit=1&radius_m=30000')
         .then(function (json) {
           var f = json && json.features && json.features[0];
           return f ? (f.name + (f.region ? ', ' + f.region : '')) : null;
@@ -125,28 +171,60 @@
 
     /* served from the main site per the API spec */
     weather: function (lat, lon) {
-      return fetchJSON(cfg.trailsplitsSite + '/api/weather/forecast?p=' + lat.toFixed(4) + ',' + lon.toFixed(4) + '&d=5');
+      return getJSONsmart(cfg.trailsplitsSite + '/api/weather/forecast?p=' + lat.toFixed(4) + ',' + lon.toFixed(4) + '&d=5');
     }
   };
 
+  /* pick up to n evenly-spread [lat, lon] points from a GeoJSON line */
+  function sampleGeometryPoints(geometry, n) {
+    var coords = [];
+    if (!geometry) return coords;
+    if (geometry.type === 'LineString' && Array.isArray(geometry.coordinates)) {
+      coords = geometry.coordinates;
+    } else if (geometry.type === 'MultiLineString' && Array.isArray(geometry.coordinates)) {
+      geometry.coordinates.forEach(function (part) { coords = coords.concat(part); });
+    }
+    var out = coords
+      .filter(function (c) { return typeof c[1] === 'number' && typeof c[0] === 'number'; })
+      .map(function (c) { return [c[1], c[0]]; });    /* → [lat, lon] pairs */
+    if (out.length <= n) return out;
+    var sampled = [], stride = (out.length - 1) / (n - 1);
+    for (var i = 0; i < n; i++) sampled.push(out[Math.round(i * stride)]);
+    return sampled;
+  }
+
   /* ============================================================
-     PROVIDER 2 — OpenStreetMap (Overpass + Nominatim) fallback
+     PROVIDER 2 — OpenStreetMap (Overpass + Nominatim)
+     Primary on flaky connections: it is CORS-friendly and has mirrors.
      ============================================================ */
+  var OVERPASS_ENDPOINTS = [
+    cfg.overpassApi,
+    'https://overpass.kumi.systems/api/interpreter',
+    'https://overpass.openstreetmap.fr/api/interpreter'
+  ];
+
+  function postOverpass(query, endpointIndex) {
+    var ep = OVERPASS_ENDPOINTS[Math.min(endpointIndex || 0, OVERPASS_ENDPOINTS.length - 1)];
+    return fetchJSON(ep, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'data=' + encodeURIComponent(query)
+    }, 25000).catch(function (err) {
+      if ((endpointIndex || 0) < OVERPASS_ENDPOINTS.length - 1) return postOverpass(query, (endpointIndex || 0) + 1);
+      throw err;
+    });
+  }
+
   var osm = {
     trailsBBox: function (lat, lon, mode) {
       var dLat = 0.14;
       var dLon = Math.min(0.6, 0.14 / Math.max(0.2, Math.cos(lat * Math.PI / 180)));
       var routeRe = mode === 'bike' ? '^(bicycle|mtb)$' : '^(hiking|foot)$';
-      var query = '[out:json][timeout:25];' +
+      var query = '[out:json][timeout:20];' +
         'relation["type"="route"]["route"~"' + routeRe + '"]["name"]' +
         '(' + (lat - dLat) + ',' + (lon - dLon) + ',' + (lat + dLat) + ',' + (lon + dLon) + ');' +
-        'out tags center 60;';
-      var body = 'data=' + encodeURIComponent(query);
-      return fetchJSON(cfg.overpassApi, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: body
-      }, 30000).then(function (json) {
+        'out tags center 80;';
+      return postOverpass(query, 0).then(function (json) {
         if (!json || !Array.isArray(json.elements)) throw new Error('bad overpass payload');
         return json.elements.map(function (el) {
           var tags = el.tags || {};
@@ -181,6 +259,24 @@
     if (isNaN(n)) return null;
     /* OSM distance is usually km; treat implausibly large values as already-meters */
     return n > 400 ? n : n * 1000;
+  }
+
+  /* Query both trail providers at once and merge by OSM relation id —
+     TrailSplits adds accurate lengths; Overpass is the resilient backbone. */
+  function fetchTrailsCombined(lat, lon, mode) {
+    var tsP = ts.trailsBBox(lat, lon, mode).catch(function () { return []; });
+    var osmP = osm.trailsBBox(lat, lon, mode).catch(function () { return []; });
+    return Promise.all([tsP, osmP]).then(function (r) {
+      var tsT = r[0], osmT = r[1], byId = {};
+      tsT.forEach(function (t) { byId[t.osmId] = t; });
+      osmT.forEach(function (t) { if (byId[t.osmId] == null) byId[t.osmId] = t; });
+      var merged = Object.keys(byId).map(function (k) { return byId[k]; });
+      if (!merged.length) throw new Error('no trails');
+      state.dataSource = tsT.length && osmT.length ? 'TrailSplits + OpenStreetMap'
+        : tsT.length ? 'TrailSplits'
+        : 'OpenStreetMap';
+      return merged;
+    });
   }
 
   /* ============================================================
@@ -498,7 +594,8 @@
   }
 
   function renderStatus() {
-    var src = state.dataSource === '…' ? '' : ' · via ' + state.dataSource;
+    var noSrc = state.dataSource === '…' || state.dataSource === '—';
+    var src = noSrc ? '' : ' · via ' + state.dataSource;
     var n = filteredTrails().length;
     var act = state.mode === 'bike' ? 'biking routes' : 'hiking trails';
     els.statusLine.innerHTML =
@@ -528,21 +625,12 @@
 
     var errors = [];
 
-    var trailsP = ts.trailsBBox(lat, lon, state.mode)
-      .then(function (trails) {
-        if (!trails.length) throw new Error('empty');
-        state.trails = trails;
-        state.dataSource = 'TrailSplits';
-      })
+    var trailsP = fetchTrailsCombined(lat, lon, state.mode)
+      .then(function (trails) { state.trails = trails; })
       .catch(function () {
-        return osm.trailsBBox(lat, lon, state.mode).then(function (trails) {
-          state.trails = trails;
-          state.dataSource = 'OpenStreetMap';
-        }).catch(function () {
-          state.trails = [];
-          state.dataSource = '—';
-          errors.push('Both trail providers are unreachable right now. Check your connection and try again.');
-        });
+        state.trails = [];
+        state.dataSource = '—';
+        errors.push('The trail providers are unreachable right now — check your connection and try again in a moment.');
       });
 
     var placesP = google.placesNearby(lat, lon, state.mode, label)
@@ -641,13 +729,15 @@
         var climb = qs('#factClimb');
         if (climb && typeof props.ascent_m === 'number') climb.textContent = '↑ ' + Math.round(props.ascent_m) + ' m';
         if (rel.geometry) {
-          return ts.elevationProfile(rel.geometry).then(function (prof) {
-            drawElevation(prof);
-            var climbEl = qs('#factClimb');
-            if (climbEl && prof.elevation && typeof prof.elevation.ascent_m === 'number') {
-              climbEl.textContent = '↑ ' + Math.round(prof.elevation.ascent_m) + ' m · ↓ ' + Math.round(prof.elevation.descent_m || 0) + ' m';
-            }
-          });
+          return ts.elevationProfile(rel.geometry)
+            .catch(function () { return ts.elevationSample(rel.geometry); })
+            .then(function (prof) {
+              drawElevation(prof);
+              var climbEl = qs('#factClimb');
+              if (climbEl && prof.elevation && typeof prof.elevation.ascent_m === 'number') {
+                climbEl.textContent = '↑ ' + Math.round(prof.elevation.ascent_m) + ' m · ↓ ' + Math.round(prof.elevation.descent_m || 0) + ' m';
+              }
+            });
         }
         return null;
       }).catch(function () {
@@ -848,8 +938,9 @@
     return botSay('Hmm, I didn’t catch that. I can filter the trails shown on this page — try “easiest trails”, “under 8 km”, “top rated” or “weather this week”.');
   }
 
-  fab.addEventListener('click', function () {
+  function openAssistant() {
     sheet.classList.add('is-open');
+    fab.classList.add('is-hidden');
     if (!log.children.length) {
       botSay('Hi! I’m the trail assistant — I answer from the routes loaded on this page (' + esc(state.location.label) + '). ' +
         'Ask me for the easiest trails, top-rated ones, short walks, or the weather.');
@@ -858,8 +949,20 @@
         chip.addEventListener('click', function () { userSay(chip.textContent); answer(chip.textContent); });
       });
     }
+  }
+  function closeAssistant() {
+    sheet.classList.remove('is-open');
+    fab.classList.remove('is-hidden');
+  }
+
+  fab.addEventListener('click', openAssistant);
+  qs('#assistantClose').addEventListener('click', closeAssistant);
+
+  /* keep the input visible above the on-screen keyboard (esp. WebView APKs) */
+  input.addEventListener('focus', function () {
+    setTimeout(function () { input.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, 280);
   });
-  qs('#assistantClose').addEventListener('click', function () { sheet.classList.remove('is-open'); });
+
   form.addEventListener('submit', function (e) {
     e.preventDefault();
     var text = input.value.trim();
@@ -867,6 +970,8 @@
     userSay(text);
     input.value = '';
     setTimeout(function () { answer(text); }, 200);
+    /* keep the conversation going — don't let the keyboard collapse */
+    setTimeout(function () { input.focus({ preventScroll: true }); }, 320);
   });
 
   /* ============================================================
@@ -906,7 +1011,7 @@
 
     els.modalClose.addEventListener('click', closeModal);
     els.backdrop.addEventListener('click', function (e) { if (e.target === els.backdrop) closeModal(); });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeModal(); sheet.classList.remove('is-open'); } });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeModal(); closeAssistant(); } });
 
     if (qParam) {
       els.searchInput.value = qParam;

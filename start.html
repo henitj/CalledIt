@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Start here — CalledIt</title>
+  <meta name="description" content="Pick hiker or biker, learn the trail difficulty scale, and head out with a safe first route.">
+  <meta name="theme-color" content="#14532d">
+  <link rel="icon" type="image/png" href="assets/icon.png">
+  <link rel="apple-touch-icon" href="assets/icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Outfit:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body data-page="start">
+  <main id="main">
+    <section class="hero hero--soft">
+      <img class="hero__bg" src="assets/hero-trails.jpg" alt="">
+      <div class="hero__inner">
+        <span class="hero__eyebrow">Start</span>
+        <h1>How do you want to move?</h1>
+        <p>Pick your style and we’ll open the trail finder tuned to it. You can always switch later on the Trails page.</p>
+      </div>
+    </section>
+
+    <section class="section" aria-label="Choose hiker or biker">
+      <div class="wrap">
+        <div class="mode-grid">
+          <a class="mode-card" href="trails.html?mode=hike" data-mode="hike">
+            <img src="assets/hiker.jpg" alt="A hiker with a backpack on an alpine trail beside a wooden signpost" loading="lazy">
+            <span class="mode-card__body">
+              <span class="chip chip--amber">On foot</span>
+              <h3>I’m a hiker</h3>
+              <p>Waymarked walking and hiking trails, from lakeside strolls to proper ridge days.</p>
+              <span class="btn btn-amber btn-sm">Explore hiking trails</span>
+            </span>
+          </a>
+          <a class="mode-card" href="trails.html?mode=bike" data-mode="bike">
+            <img src="assets/biker.jpg" alt="A mountain biker standing with his bike on a forest trail" loading="lazy">
+            <span class="mode-card__body">
+              <span class="chip chip--blue">On wheels</span>
+              <h3>I’m a biker</h3>
+              <p>Signed cycling and mountain-bike routes — singletracks, forest loops and tours.</p>
+              <span class="btn btn-primary btn-sm">Explore biking routes</span>
+            </span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="before-title">
+      <h2 class="section-title" id="before-title">Before you go</h2>
+      <p class="section-sub">A two-minute check that makes every trip better.</p>
+      <div class="wrap">
+        <div class="accordion" id="accordion">
+          <div class="accordion__item">
+            <button class="accordion__btn" aria-expanded="false">
+              <span>🥾 Pack the essentials</span>
+              <span class="caret"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="caret"><polyline points="6 9 12 15 18 9"/></svg></span>
+            </button>
+            <div class="accordion__panel"><div>
+              <ul>
+                <li><b>Water</b> — at least 1&nbsp;L per 2 hours of walking, more in heat.</li>
+                <li><b>Layers</b> — a warm and a rain layer, even on a blue-sky day.</li>
+                <li><b>Food</b> — something salty and something sweet.</li>
+                <li><b>Phone + power bank</b> — and the route saved for offline use.</li>
+                <li><b>First-aid basics</b>, sun protection, and a headlamp for long days.</li>
+              </ul>
+            </div></div>
+          </div>
+          <div class="accordion__item">
+            <button class="accordion__btn" aria-expanded="false">
+              <span>⛈ Read the weather like a local</span>
+              <span class="caret"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="caret"><polyline points="6 9 12 15 18 9"/></svg></span>
+            </button>
+            <div class="accordion__panel"><div>
+              <ul>
+                <li>Check the <b>trailhead forecast</b> on the Trails page — valleys and summits often differ wildly.</li>
+                <li>Afternoon thunderstorms are a mountain classic in summer: <b>start early, turn around early</b>.</li>
+                <li>Wind on ridges matters more than temperature. 40+ km/h gusts mean hats, poles and care.</li>
+              </ul>
+            </div></div>
+          </div>
+          <div class="accordion__item">
+            <button class="accordion__btn" aria-expanded="false">
+              <span>📣 Tell someone your plan</span>
+              <span class="caret"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="caret"><polyline points="6 9 12 15 18 9"/></svg></span>
+            </button>
+            <div class="accordion__panel"><div>
+              <ul>
+                <li>Share your route and planned return time with a friend (the Share button in the top bar makes it easy).</li>
+                <li>Agree on a “call me by” time — if you’re not back, they know to check in.</li>
+                <li>Going solo often? Our <a href="social.html">Community page</a> has buddy check-in ideas.</li>
+              </ul>
+            </div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="sac-title">
+      <h2 class="section-title" id="sac-title">Difficulty, in plain language</h2>
+      <p class="section-sub">Trails use the SAC hiking scale. Here’s what the grades mean when you see them on the Trails page.</p>
+      <div class="wrap">
+        <table class="sac-table">
+          <thead><tr><th>Grade</th><th>What it means</th></tr></thead>
+          <tbody>
+            <tr><td class="sac-grade">T1 · Hiking</td><td>Well-kept path, mostly gentle. Normal trainers are fine.</td></tr>
+            <tr><td class="sac-grade">T2 · Mountain</td><td>Steeper, rooty or rocky in places. Hiking shoes recommended.</td></tr>
+            <tr><td class="sac-grade">T3 · Demanding</td><td>Exposed spots possible, hands occasionally helpful. Sure-footedness needed.</td></tr>
+            <tr><td class="sac-grade">T4+ · Alpine</td><td>Steep, exposed, sometimes aided by cables or ladders. Experience required.</td></tr>
+          </tbody>
+        </table>
+        <p class="center muted" style="margin-top:14px; font-size:.9rem">When a trail isn’t graded, treat it as unknown — start short and see how it feels.</p>
+        <div class="btn-row" style="margin-top:22px">
+          <a class="btn btn-primary" href="trails.html">Ready — find my trail</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <noscript><p style="text-align:center; padding:20px">CalledIt needs JavaScript to run.</p></noscript>
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/start.js"></script>
+</body>
+</html>

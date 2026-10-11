@@ -1,16 +1,15 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
 android {
     namespace = "com.calledit.app"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.calledit.app"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 2
         versionName = "1.1.0"
     }
@@ -33,17 +32,14 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-    kotlinOptions {
-        jvmTarget = "17"
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
     }
 }
 
 // Bundle the website into the APK so the app and the site can never drift
 // apart — this copies the current web app (html/css/js/assets) at build time.
-// Landed under assets/www/… (served by NanoHTTPD as /… and /index.html).
+// Landed under assets/www/… (served by LocalServer as /… and /index.html).
 val webAssetsRoot = layout.buildDirectory.dir("generated/webassets")
 
 val copyWebAssets = tasks.register<Copy>("copyWebAssets") {
@@ -60,9 +56,6 @@ android.sourceSets.getByName("main").assets.srcDir(webAssetsRoot)
 tasks.named("preBuild") { dependsOn(copyWebAssets) }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.appcompat:appcompat:1.7.0")
-    implementation("androidx.webkit:webkit:1.11.0")
-    implementation("androidx.activity:activity-ktx:1.9.2")
-    implementation("org.nanohttpd:nanohttpd:2.3.1")
+    // Intentionally empty: the app uses only framework APIs, so it builds
+    // with or without access to Google's Maven (see android/ci/build-apk.sh).
 }

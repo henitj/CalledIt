@@ -9,3 +9,6 @@ android/build/
 android/app/build/
 android/local.properties
 android/app/src/main/assets/www/
+android/ci/build/
+android/ci/debug.keystore
+android/dist/

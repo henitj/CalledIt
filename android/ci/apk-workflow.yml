@@ -24,12 +24,20 @@ jobs:
           node --check js/start.js
           node --check js/trails.js
           node test/dom-check.js
+          npm i --no-save --prefix /tmp/t jsdom@24
+          NODE_PATH=/tmp/t/node_modules node test/assistant-check.js
+          NODE_PATH=/tmp/t/node_modules node test/tracker-stress.js
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: LocalServer JVM test
+        run: |
+          javac -source 1.8 -target 1.8 -d /tmp/ls android/app/src/main/java/com/calledit/app/LocalServer.java android/ci/LocalServerTest.java
+          java -cp /tmp/ls com.calledit.app.LocalServerTest .
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4

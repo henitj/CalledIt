@@ -4,15 +4,29 @@ import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.ActivityNotFoundException;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.Color;
+import android.graphics.Typeface;
 import android.location.LocationManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Message;
 import android.provider.Settings;
 import android.util.Log;
-import android.view.KeyEvent;
+import android.util.TypedValue;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.ViewParent;
+import android.view.Window;
+import android.view.WindowManager;
+import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
@@ -21,33 +35,34 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.InetSocketAddress;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.net.SocketException;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
- * CalledIt Android app.
+ * CalledIt Android app (framework-only WebView shell, no AndroidX).
  *
- * Serves the bundled website from a tiny localhost HTTP server so that
- * HTTP-referrer-restricted API keys (Google Maps etc.) can whitelist
- * `http://localhost:8765/*` and `http://127.0.0.1:8765/*`.
+ * The bundled website is served from a tiny HTTP server on
+ * http://127.0.0.1:8765 so it has a real web origin: Google Maps keys work,
+ * localStorage persists, and Puter.js (the free Grok AI) can sign in.
  *
- * Bug fixes vs. a naive WebView wrapper:
- *  - back gesture / back button goes back through page & overlay history
- *    (the site pushes history entries for modals) instead of exiting the app
- *  - after location permission is granted, if the device's location (GPS)
- *    switch is OFF the user is prompted and taken to the system settings
- *  - file chooser support so profile photo upload works
- *  - external map/directions links open in the real map apps
+ * v1.2 fixes:
+ *  - BACK GESTURE: the manifest no longer opts into OnBackInvokedCallback.
+ *    With that flag on, Android 13+ never calls onBackPressed(), so the back
+ *    gesture closed the app. Now back walks page/overlay history first.
+ *  - AI SIGN-IN: Puter's one-time sign-in uses window.open(); WebViews block
+ *    popups by default. Popups are now supported: Puter's window opens in an
+ *    in-app sheet (with a close button + back support) and hands the token
+ *    back to the page via window.opener. Other target=_blank links open in
+ *    the browser / maps app as before.
+ *  - LOCATION: one native "Turn on location" prompt (no stacked dialogs) and,
+ *    when you come back from Settings with location on, the page continues
+ *    automatically (Near me / Track hike).
+ *  - Local server (LocalServer.java): one thread per connection with
+ *    timeouts and full header reads (a stalled preconnect socket can no
+ *    longer freeze the app).
  */
 public class MainActivity extends Activity {
 
@@ -61,6 +76,11 @@ public class MainActivity extends Activity {
     private ValueCallback<Uri[]> filePathCallback;
     private String pendingGeoOrigin;
     private GeolocationPermissions.Callback pendingGeoCallback;
+
+    private Dialog popupDialog;
+    private WebView popupView;
+    private AlertDialog locationDialog;
+    private boolean notifyLocationOnResume = false;
 
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     @Override
@@ -80,10 +100,15 @@ public class MainActivity extends Activity {
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(true);
-        s.setSupportMultipleWindows(false);
+        s.setSupportMultipleWindows(true);                 // Puter sign-in window
+        s.setJavaScriptCanOpenWindowsAutomatically(true);
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
         s.setTextZoom(100);
+
+        CookieManager cookies = CookieManager.getInstance();
+        cookies.setAcceptCookie(true);
+        cookies.setAcceptThirdPartyCookies(webView, true);
 
         webView.addJavascriptInterface(new CalledItAndroid(), "CalledItAndroid");
 
@@ -91,17 +116,16 @@ public class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 if (request == null || request.getUrl() == null) return false;
+                if (!request.isForMainFrame()) return false;          // iframes load normally
                 Uri url = request.getUrl();
+                String scheme = url.getScheme() == null ? "" : url.getScheme();
+                if (scheme.equals("about") || scheme.equals("data") || scheme.equals("blob")
+                        || scheme.equals("javascript")) return false;
                 String host = url.getHost() == null ? "" : url.getHost();
-                String scheme = url.getScheme() == null ? "http" : url.getScheme();
                 if (host.equals("127.0.0.1") || host.equals("localhost")) {
                     return false; // our bundled app
                 }
-                try {
-                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url.toString())));
-                } catch (ActivityNotFoundException e) {
-                    Log.w(TAG, "No activity for " + url);
-                }
+                openExternal(url.toString());
                 return true;
             }
         });
@@ -121,6 +145,16 @@ public class MainActivity extends Activity {
                             Manifest.permission.ACCESS_COARSE_LOCATION
                     }, REQ_GEO);
                 }
+            }
+
+            @Override
+            public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture,
+                                          Message resultMsg) {
+                WebView popup = createPopupWebView();
+                WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                transport.setWebView(popup);
+                resultMsg.sendToTarget();
+                return true;
             }
 
             @Override
@@ -152,10 +186,16 @@ public class MainActivity extends Activity {
         });
 
         try {
-            localServer = new LocalServer(PORT);
+            localServer = new LocalServer(PORT, new LocalServer.AssetSource() {
+                @Override
+                public InputStream open(String path) throws IOException {
+                    return getAssets().open(path);
+                }
+            });
             localServer.start();
         } catch (Exception e) {
             Log.w(TAG, "Local server failed to start, loading assets directly", e);
+            localServer = null;
         }
         String startUrl = localServer != null
                 ? "http://127.0.0.1:" + PORT + "/index.html"
@@ -163,10 +203,220 @@ public class MainActivity extends Activity {
         webView.loadUrl(startUrl);
     }
 
+    /* ======================= popup windows (Puter sign-in) ======================= */
+
+    private static boolean isPuterHost(String host) {
+        if (host == null) return false;
+        host = host.toLowerCase();
+        return host.equals("puter.com") || host.endsWith(".puter.com");
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private WebView createPopupWebView() {
+        final WebView popup = new WebView(this);
+        WebSettings ps = popup.getSettings();
+        ps.setJavaScriptEnabled(true);
+        ps.setDomStorageEnabled(true);
+        ps.setDatabaseEnabled(true);
+        ps.setSupportMultipleWindows(false);   // nested window.open loads in place
+        ps.setJavaScriptCanOpenWindowsAutomatically(true);
+        ps.setLoadWithOverviewMode(true);
+        ps.setUseWideViewPort(true);
+        ps.setTextZoom(100);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(popup, true);
+        popup.setWebViewClient(new PopupClient(popup));
+        popup.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onCloseWindow(WebView window) {
+                destroyPopup(window);            // Puter closes itself after sign-in
+            }
+        });
+        return popup;
+    }
+
+    /** Decides on the popup's first real URL: Puter → in-app sheet; anything else → browser. */
+    private class PopupClient extends WebViewClient {
+        private final WebView popup;
+        private boolean decided = false;
+
+        PopupClient(WebView popup) {
+            this.popup = popup;
+        }
+
+        private boolean route(String url) {
+            if (url == null || url.length() == 0) return false;
+            if (url.startsWith("about:") || url.startsWith("data:") || url.startsWith("blob:")
+                    || url.startsWith("javascript:")) return false;
+            Uri u = Uri.parse(url);
+            if (isPuterHost(u.getHost())) {
+                if (!decided) {
+                    decided = true;
+                    showPopupDialog(popup);
+                }
+                return false;                    // keep Puter pages in the sheet
+            }
+            if (!decided) {                      // a plain target=_blank link
+                decided = true;
+                openExternal(url);
+                popup.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        destroyPopup(popup);
+                    }
+                });
+                return true;
+            }
+            openExternal(url);                   // links leaving Puter → browser
+            return true;
+        }
+
+        @Override
+        public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+            if (request == null || request.getUrl() == null) return false;
+            if (!request.isForMainFrame()) return false;
+            return route(request.getUrl().toString());
+        }
+
+        @Override
+        public void onPageStarted(WebView view, String url, Bitmap favicon) {
+            super.onPageStarted(view, url, favicon);
+            if (!decided) route(url);            // the first load may skip shouldOverrideUrlLoading
+        }
+    }
+
+    private int dp(int v) {
+        return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
+    }
+
+    private void showPopupDialog(final WebView popup) {
+        if (isFinishing()) return;
+        if (popupDialog != null && popupView != popup) destroyPopup(popupView);
+        popupView = popup;
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.WHITE);
+
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setBackgroundColor(0xFF14532D);
+        bar.setPadding(dp(14), dp(8), dp(6), dp(8));
+
+        TextView title = new TextView(this);
+        title.setText("Free Puter sign-in · powers the Grok AI");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setSingleLine(true);
+        bar.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView close = new TextView(this);
+        close.setText("\u2715");
+        close.setTextColor(Color.WHITE);
+        close.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        close.setGravity(Gravity.CENTER);
+        close.setContentDescription("Close sign-in");
+        close.setClickable(true);
+        close.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                destroyPopup(popup);
+            }
+        });
+        bar.addView(close, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+        root.addView(bar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        ViewParent parent = popup.getParent();
+        if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(popup);
+        root.addView(popup, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        Dialog d = new Dialog(this, android.R.style.Theme_Material_Light_NoActionBar) {
+            @Override
+            public void onBackPressed() {
+                if (popup.canGoBack()) popup.goBack();
+                else destroyPopup(popup);
+            }
+        };
+        d.setContentView(root);
+        d.setCancelable(true);
+        d.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface dialog) {
+                destroyPopup(popup);
+            }
+        });
+        Window w = d.getWindow();
+        if (w != null) {
+            w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        }
+        popupDialog = d;
+        d.show();
+    }
+
+    /** Idempotent: hides the sheet (if this popup owns it) and destroys the WebView. */
+    private void destroyPopup(WebView popup) {
+        if (popup == null) return;
+        if ("destroyed".equals(popup.getTag())) return;
+        popup.setTag("destroyed");
+        if (popup == popupView) {
+            popupView = null;
+            Dialog d = popupDialog;
+            popupDialog = null;
+            if (d != null) {
+                try {
+                    if (d.isShowing()) d.dismiss();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        try {
+            ViewParent parent = popup.getParent();
+            if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(popup);
+            popup.stopLoading();
+            popup.destroy();   // the opener now sees window.closed === true
+        } catch (Exception e) {
+            Log.w(TAG, "popup cleanup", e);
+        }
+    }
+
+    private void openExternal(String url) {
+        try {
+            Intent intent;
+            if (url.startsWith("intent:")) {
+                intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
+                intent.addCategory(Intent.CATEGORY_BROWSABLE);
+                intent.setComponent(null);
+                intent.setSelector(null);
+            } else {
+                intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            }
+            startActivity(intent);
+        } catch (Exception e) {
+            Log.w(TAG, "No activity for " + url);
+        }
+    }
+
+    /* ======================= location ======================= */
+
     private boolean hasLocationPermission() {
         int fine = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION);
         int coarse = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION);
         return fine == PackageManager.PERMISSION_GRANTED || coarse == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean isLocationEnabled() {
+        LocationManager lm = (LocationManager) getSystemService(LOCATION_SERVICE);
+        if (lm == null) return false;
+        if (Build.VERSION.SDK_INT >= 28) return lm.isLocationEnabled();
+        try {
+            return lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                    || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     @Override
@@ -185,6 +435,41 @@ public class MainActivity extends Activity {
             }
             pendingGeoCallback = null;
             pendingGeoOrigin = null;
+        }
+    }
+
+    /** Permission granted but the device's location switch is OFF → prompt once. */
+    private void ensureLocationServicesEnabled() {
+        if (!isLocationEnabled()) {
+            notifyLocationOnResume = true;
+            showLocationDialog();
+        }
+    }
+
+    private void showLocationDialog() {
+        if (isFinishing()) return;
+        if (locationDialog != null && locationDialog.isShowing()) return;   // never stack prompts
+        locationDialog = new AlertDialog.Builder(this)
+                .setTitle("Turn on location")
+                .setMessage("CalledIt is allowed to use your location, but your phone's location (GPS) "
+                        + "is switched off. Turn it on to find trails near you and to track your hike.")
+                .setPositiveButton("Turn on location", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        notifyLocationOnResume = true;
+                        openLocationSettingsNow();
+                    }
+                })
+                .setNegativeButton("Not now", null)
+                .create();
+        locationDialog.show();
+    }
+
+    private void openLocationSettingsNow() {
+        try {
+            startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
+        } catch (ActivityNotFoundException e) {
+            startActivity(new Intent(Settings.ACTION_SETTINGS));
         }
     }
 
@@ -212,39 +497,19 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** If device location (GPS) is off, prompt the user to turn it on. */
-    private void ensureLocationServicesEnabled() {
-        LocationManager lm = (LocationManager) getSystemService(LOCATION_SERVICE);
-        boolean enabled = lm != null && (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
-                || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER));
-        if (!enabled) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Turn on location")
-                    .setMessage("CalledIt needs your location to find trails near you and to track "
-                            + "your hike. Make sure device location (GPS) is turned on.")
-                    .setPositiveButton("Open location settings", new android.content.DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(android.content.DialogInterface dialog, int which) {
-                            openLocationSettingsNow();
-                        }
-                    })
-                    .setNegativeButton("Not now", null)
-                    .show();
-        }
-    }
+    /* ======================= back + lifecycle ======================= */
 
-    private void openLocationSettingsNow() {
-        try {
-            startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
-        } catch (ActivityNotFoundException e) {
-            startActivity(new Intent(Settings.ACTION_SETTINGS));
-        }
-    }
-
-    /* Back button / back gesture: walk history (closes overlays first thanks
-       to the site's history API), never an instant exit from a sub-page. */
+    /* Back button / back gesture: close the sign-in sheet, then walk page and
+       overlay history (the site pushes history entries for its sheets and
+       modals); only exits from the very first page. Works on Android 13+
+       because the manifest does NOT opt into OnBackInvokedCallback. */
     @Override
     public void onBackPressed() {
+        if (popupView != null) {
+            if (popupView.canGoBack()) popupView.goBack();
+            else destroyPopup(popupView);
+            return;
+        }
         if (webView != null && webView.canGoBack()) {
             webView.goBack();
         } else {
@@ -256,21 +521,28 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         if (webView != null) webView.onPause();
+        CookieManager.getInstance().flush();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         if (webView != null) webView.onResume();
+        if (notifyLocationOnResume && isLocationEnabled()) {
+            notifyLocationOnResume = false;
+            if (locationDialog != null && locationDialog.isShowing()) locationDialog.dismiss();
+            if (webView != null) {
+                webView.evaluateJavascript(
+                        "window.CalledIt&&CalledIt.onNativeLocationOn&&CalledIt.onNativeLocationOn()", null);
+            }
+        }
     }
 
     @Override
     protected void onDestroy() {
+        if (popupView != null) destroyPopup(popupView);
         if (localServer != null) {
-            try {
-                localServer.stop();
-            } catch (Exception ignored) {
-            }
+            localServer.stopServer();
         }
         if (webView != null) webView.destroy();
         super.onDestroy();
@@ -278,131 +550,44 @@ public class MainActivity extends Activity {
 
     /** Bridge exposed to the web app as window.CalledItAndroid. */
     class CalledItAndroid {
+        /** Straight to the system location settings (the user already chose to). */
         @JavascriptInterface
         public void openLocationSettings() {
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-                    ensureLocationServicesEnabled();
+                    notifyLocationOnResume = true;
+                    openLocationSettingsNow();
                 }
             });
         }
-    }
 
-    /** Tiny HTTP server for the bundled web app (assets/www). */
-    class LocalServer extends Thread {
-        private final ServerSocket serverSocket;
-        private volatile boolean running = true;
-
-        LocalServer(int port) throws IOException {
-            serverSocket = new ServerSocket();
-            serverSocket.setReuseAddress(true);
-            serverSocket.bind(new InetSocketAddress("127.0.0.1", port));
-            setDaemon(true);
+        /** Shows the single native prompt if location is off; false = location is already on. */
+        @JavascriptInterface
+        public boolean promptEnableLocation() {
+            if (isLocationEnabled()) return false;
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    notifyLocationOnResume = true;
+                    showLocationDialog();
+                }
+            });
+            return true;
         }
 
-        void stopServer() {
-            running = false;
+        @JavascriptInterface
+        public boolean isLocationOn() {
+            return isLocationEnabled();
+        }
+
+        @JavascriptInterface
+        public String appVersion() {
             try {
-                serverSocket.close();
-            } catch (IOException ignored) {
+                return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            } catch (Exception e) {
+                return "";
             }
-        }
-
-        @Override
-        public void run() {
-            while (running) {
-                try {
-                    final Socket socket = serverSocket.accept();
-                    handle(socket);
-                } catch (SocketException e) {
-                    break;
-                } catch (IOException e) {
-                    Log.w(TAG, "Local server accept failed", e);
-                }
-            }
-        }
-
-        private void handle(Socket socket) {
-            InputStream in = null;
-            try {
-                in = socket.getInputStream();
-                // read request line (we only need the path)
-                StringBuilder req = new StringBuilder();
-                int c;
-                while ((c = in.read()) != -1 && c != '\n') {
-                    if (req.length() < 2048) req.append((char) c);
-                }
-                String line = req.toString();
-                String path = "/";
-                String[] parts = line.split(" ");
-                if (parts.length > 1) path = parts[1];
-
-                byte[] body;
-                String status = "HTTP/1.0 200 OK";
-                String mime = "application/octet-stream";
-                int q = path.indexOf('?');
-                if (q >= 0) path = path.substring(0, q);
-                if (path.equals("/") || path.isEmpty()) path = "/index.html";
-                if (path.contains("..")) {
-                    status = "HTTP/1.0 403 Forbidden";
-                    body = "Forbidden".getBytes("UTF-8");
-                    mime = "text/plain";
-                } else {
-                    InputStream asset;
-                    try {
-                        asset = getAssets().open("www" + path);
-                    } catch (IOException e) {
-                        asset = null;
-                    }
-                    if (asset == null) {
-                        status = "HTTP/1.0 404 Not Found";
-                        body = "Not found".getBytes("UTF-8");
-                        mime = "text/plain";
-                    } else {
-                        body = readAll(asset);
-                        mime = mimeFor(path);
-                    }
-                }
-
-                OutputStream out = socket.getOutputStream();
-                String head = status + "\r\nContent-Type: " + mime
-                        + "\r\nContent-Length: " + body.length
-                        + "\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
-                out.write(head.getBytes("UTF-8"));
-                out.write(body);
-                out.flush();
-            } catch (IOException e) {
-                Log.w(TAG, "Local server request failed", e);
-            } finally {
-                try {
-                    if (in != null) in.close();
-                    socket.close();
-                } catch (IOException ignored) {
-                }
-            }
-        }
-
-        private byte[] readAll(InputStream in) throws IOException {
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            byte[] buf = new byte[16384];
-            int n;
-            while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
-            return bos.toByteArray();
-        }
-
-        private String mimeFor(String path) {
-            int dot = path.lastIndexOf('.');
-            String ext = dot >= 0 ? path.substring(dot + 1).toLowerCase() : "";
-            if (ext.equals("html")) return "text/html; charset=utf-8";
-            if (ext.equals("js")) return "text/javascript; charset=utf-8";
-            if (ext.equals("css")) return "text/css; charset=utf-8";
-            if (ext.equals("json") || ext.equals("webmanifest")) return "application/json";
-            if (ext.equals("png")) return "image/png";
-            if (ext.equals("jpg") || ext.equals("jpeg")) return "image/jpeg";
-            if (ext.equals("svg")) return "image/svg+xml";
-            if (ext.equals("ico")) return "image/x-icon";
-            return "application/octet-stream";
         }
     }
 }

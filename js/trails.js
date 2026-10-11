@@ -21,7 +21,7 @@
     weather: null,                      // trailsplits weather response
     dataSource: '…',
     googleOk: false,
-    mapLib: null,                       // 'google' | 'osm' | null
+    mapLib: null,                       // 'google' | 'leaflet' | null
     map: null, markers: [],
     filter: { maxKm: null, sort: 'near', easyOnly: false, minRating: null },
     loading: false
@@ -34,7 +34,7 @@
     weatherStrip: qs('#weatherStrip'), weatherNote: qs('#weatherNote'),
     highlights: qs('#highlights'), highlightsRow: qs('#highlightsRow'),
     trailList: qs('#trailList'),
-    googleMap: qs('#googleMap'), osmMap: qs('#osmMap'), mapCaption: qs('#mapCaption'),
+    googleMap: qs('#googleMap'), leafletMap: qs('#leafletMap'), mapCaption: qs('#mapCaption'),
     backdrop: qs('#modalBackdrop'), modalBody: qs('#modalBody'), modalClose: qs('#modalClose')
   };
 
@@ -58,21 +58,31 @@
     });
   }
 
-  /* GET that survives CORS-blocked endpoints: try direct first, then a
-     public CORS proxy (api.allorigins.win). Keeps TrailSplits/weather working
-     even where the provider hasn't enabled cross-origin browser calls. */
-  function withTrailKey(url) {
-    if (cfg.trailsplitsApiKey && url.indexOf(cfg.trailsplitsApi) === 0) {
-      url += (url.indexOf('?') === -1 ? '?' : '&') + 'key=' + encodeURIComponent(cfg.trailsplitsApiKey);
-    }
-    return url;
+  /* TrailSplits API key (optional) goes in an Authorization: Bearer header
+     (https://trailsplits.com/api#auth). Keyless = 500 free credits/day. */
+  function tsAuthHeaders(url) {
+    var key = (cfg.trailsplitsApiKey || '').trim();
+    if (key && url.indexOf(cfg.trailsplitsApi) === 0) return { 'Authorization': 'Bearer ' + key };
+    return null;
   }
+
+  /* GET that survives CORS-blocked endpoints: try direct first, then a
+     public CORS proxy (api.allorigins.win). */
   function getJSONsmart(url, timeoutMs) {
-    url = withTrailKey(url);
-    return fetchJSON(url, null, timeoutMs).catch(function () {
+    var h = tsAuthHeaders(url);
+    return fetchJSON(url, h ? { headers: h } : null, timeoutMs).catch(function () {
       var proxied = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
       return fetchJSON(proxied, null, (timeoutMs || 12000) + 8000);
     });
+  }
+
+  /* POST JSON to the TrailSplits API (permissive CORS, key optional) */
+  function tsPost(path, body, timeoutMs) {
+    var url = cfg.trailsplitsApi + path;
+    var headers = { 'Content-Type': 'application/json' };
+    var h = tsAuthHeaders(url);
+    if (h) headers.Authorization = h.Authorization;
+    return fetchJSON(url, { method: 'POST', headers: headers, body: JSON.stringify(body) }, timeoutMs || 20000);
   }
 
   function hasGoogleKey() {
@@ -116,11 +126,7 @@
     },
 
     elevationProfile: function (geometry) {
-      return fetchJSON(cfg.trailsplitsApi + '/v1/elevation-profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ geometry: geometry, points: 400 })
-      });
+      return tsPost('/v1/elevation-profile', { geometry: geometry, points: 400 }, 15000);
     },
 
     /* fallback elevation: sampled terrain heights via GET elevation sampler */
@@ -177,10 +183,39 @@
     },
 
     /* served from the main site per the API spec */
-    weather: function (lat, lon) {
-      return getJSONsmart(cfg.trailsplitsSite + '/api/weather/forecast?p=' + lat.toFixed(4) + ',' + lon.toFixed(4) + '&d=5');
+    weather: function (lat, lon, days) {
+      return getJSONsmart(cfg.trailsplitsSite + '/api/weather/forecast?p=' + lat.toFixed(4) + ',' + lon.toFixed(4) + '&d=' + (days || 5));
     }
   };
+
+  /* Open-Meteo directly (CORS-friendly) in the TrailSplits weather shape —
+     used only if the TrailSplits forecast can’t be reached. */
+  function openMeteoForecast(lat, lon, days) {
+    var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat.toFixed(4) + '&longitude=' + lon.toFixed(4) +
+      '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max' +
+      '&timezone=auto&forecast_days=' + (days || 5);
+    return fetchJSON(url, null, 12000).then(function (j) {
+      var d = j && j.daily;
+      if (!d || !d.time) throw new Error('bad forecast');
+      return {
+        provider: { attribution: 'Weather data by Open-Meteo.com (CC BY 4.0)' },
+        points: [{ days: d.time.map(function (date, i) {
+          return {
+            date: date, weather_code: d.weather_code[i], temp_max_c: d.temperature_2m_max[i], temp_min_c: d.temperature_2m_min[i],
+            precip_mm: d.precipitation_sum[i], precip_probability_max_pct: d.precipitation_probability_max ? d.precipitation_probability_max[i] : null,
+            wind_max_kmh: d.wind_speed_10m_max ? d.wind_speed_10m_max[i] : null, gust_max_kmh: d.wind_gusts_10m_max ? d.wind_gusts_10m_max[i] : null
+          };
+        }) }]
+      };
+    });
+  }
+
+  function getForecast(lat, lon, days) {
+    return ts.weather(lat, lon, days).then(function (w) {
+      if (!w || !w.points || !w.points[0] || !w.points[0].days || !w.points[0].days.length) throw new Error('empty forecast');
+      return w;
+    }).catch(function () { return openMeteoForecast(lat, lon, days); });
+  }
 
   /* pick up to n evenly-spread [lat, lon] points from a GeoJSON line */
   function sampleGeometryPoints(geometry, n) {
@@ -375,134 +410,388 @@
   }
 
   /* ============================================================
-     Map — Google Maps FIRST (as requested). The OSM embed is only a
-     last-resort fallback when the Google key is missing/invalid, and it
-     says so on the caption + nudges the user to add a key in Settings.
+     Map — Google Maps first. (The configured key was verified on
+     2026-10-11 for the Maps JavaScript API, unrestricted, so it also works
+     inside the Android app.) If Google can’t load for any reason, a
+     bundled Leaflet map with clean CARTO / topo tiles takes over — never
+     the old plain OSM iframe — so trail pins, the live hike track and
+     loops planned by the assistant still show.
      ============================================================ */
-  var gmapsLoaded = false;
+  var gmaps = { status: 'idle', error: null, slow: false };   /* idle | loading | ready | failed */
+  var lmap = { map: null, group: null };                      /* Leaflet fallback */
+  var gOv = { pins: [], track: null, me: null, loop: null };  /* Google overlays */
+  var lOv = { track: null, me: null, loop: null };            /* Leaflet overlays */
+  var loopPath = null;          /* [{lat,lng}] loop planned by the assistant */
+  var followMe = true;          /* keep the live position centred while tracking */
+  var fittedKey = '';           /* area the map was last fitted to */
 
-  function renderOSMMap() {
-    state.mapLib = 'osm';
-    els.googleMap.style.display = 'none';
-    els.osmMap.style.display = 'block';
-    var lat = state.location.lat, lon = state.location.lon;
-    var dLat = 0.09, dLon = Math.min(0.5, 0.09 / Math.max(0.2, Math.cos(lat * Math.PI / 180)));
-    els.osmMap.src = 'https://www.openstreetmap.org/export/embed.html' +
-      '?bbox=' + (lon - dLon) + ',' + (lat - dLat) + ',' + (lon + dLon) + ',' + (lat + dLat) +
-      '&layer=mapnik&marker=' + lat + ',' + lon;
-    els.mapCaption.innerHTML = hasGoogleKey()
-      ? 'Map © OpenStreetMap contributors — <b>Google Maps didn’t load</b> (key rejected or restricted). ' +
-        'Add a working Google Maps key via <b>Settings → API keys</b> (link in the footer) to get the full Google map.'
-      : 'Map © OpenStreetMap contributors — add a Google Maps key via <b>Settings → API keys</b> (footer) to switch to Google Maps.';
+  function setMapCaption(html) { if (els.mapCaption) els.mapCaption.innerHTML = html; }
+
+  function friendlyMapsError(code) {
+    return ({
+      InvalidKeyMapError: 'the Google key is invalid',
+      RefererNotAllowedMapError: 'the Google key doesn’t allow this web address',
+      ApiNotActivatedMapError: 'the Maps JavaScript API isn’t enabled for the key',
+      BillingNotEnabledMapError: 'billing isn’t enabled on the key’s Google Cloud project',
+      MissingKeyMapError: 'no Google key is set',
+      ExpiredKeyMapError: 'the Google key has expired',
+      OverQuotaMapError: 'the Google key is over its quota',
+      offline: 'Google can’t be reached right now (offline?)',
+      auth: 'Google rejected the key',
+      'gm-err': 'Google rejected the key',
+      render: 'the Google map failed to draw'
+    })[code] || ('Google Maps reported “' + code + '”');
   }
 
+  function googleFailed(code) {
+    if (gmaps.status === 'failed') return;
+    gmaps.status = 'failed';
+    gmaps.error = code || 'unknown';
+    renderLeafletMap();
+  }
+
+  /* Google reports key/billing problems through console.error and a grey
+     “can’t load Google Maps” box — catch both, plus gm_authFailure. */
+  (function watchGoogleErrors() {
+    var orig = console.error;
+    console.error = function () {
+      try {
+        var m = String(arguments[0] || '').match(/Google Maps JavaScript API error: (\w+)/);
+        if (m && /MapError$|AuthenticationCommonError$/.test(m[1])) googleFailed(m[1]);
+      } catch (e) { /* never break logging */ }
+      return orig.apply(console, arguments);
+    };
+    window.gm_authFailure = function () { googleFailed('auth'); };
+  })();
+
+  function loadGoogleMaps() {
+    if (gmaps.status !== 'idle') return;
+    if (!hasGoogleKey()) { googleFailed('MissingKeyMapError'); return; }
+    gmaps.status = 'loading';
+    window.__calleditMapsReady = function () {
+      if (gmaps.status === 'failed') return;
+      gmaps.status = 'ready';
+      try { renderMap(); } catch (e) { googleFailed('render'); }
+      [2500, 7000].forEach(function (ms) {
+        setTimeout(function () {
+          if (els.googleMap && els.googleMap.querySelector('.gm-err-container')) googleFailed('gm-err');
+        }, ms);
+      });
+    };
+    var s = document.createElement('script');
+    s.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(cfg.googleMapsApiKey) +
+      '&v=weekly&callback=__calleditMapsReady';
+    s.async = true;
+    s.onerror = function () { googleFailed('offline'); };
+    document.head.appendChild(s);
+    /* very slow network: show the fallback meanwhile, swap to Google when it arrives */
+    setTimeout(function () {
+      if (gmaps.status === 'loading') { gmaps.slow = true; renderLeafletMap(); }
+    }, 12000);
+  }
+
+  function renderMap() {
+    if (gmaps.status === 'ready' && window.google && window.google.maps) { renderGoogleMap(); return; }
+    if (gmaps.status === 'idle') loadGoogleMaps();
+    if (gmaps.status === 'failed' || gmaps.slow) renderLeafletMap();
+    else setMapCaption('Loading Google Maps…');
+  }
+
+  function areaKey() { return state.location.lat.toFixed(4) + ',' + state.location.lon.toFixed(4) + ',' + state.mode + ',' + state.trails.length; }
+
+  function pinTrails() {
+    var list = filteredTrails();
+    return (list.length ? list : state.trails).slice(0, 40);
+  }
+
+  function mapCaptionText(lib) {
+    var bits = [];
+    bits.push(lib === 'google' ? 'Map © Google' : 'Map © OpenStreetMap contributors © CARTO');
+    bits.push((state.mode === 'bike' ? '🚴' : '🥾') + ' pins = trail starts (tap one for details)');
+    if (tracker.active) bits.push('<span style="color:#16a34a">━</span> your track · 🔵 you');
+    if (loopPath) bits.push('<span style="color:#7c3aed">━</span> planned loop');
+    var cap = bits.join(' · ');
+    if (lib !== 'google') {
+      cap += gmaps.status === 'failed'
+        ? '<br><b>Google Maps couldn’t load</b> — ' + esc(friendlyMapsError(gmaps.error)) + '. Showing the backup map.'
+        : '<br>Google Maps is still loading on this slow connection — it replaces this map as soon as it’s ready.';
+    }
+    return cap;
+  }
+
+  /* ---------------- Google ---------------- */
   function renderGoogleMap() {
+    var g = window.google;
     state.mapLib = 'google';
     els.googleMap.style.display = 'block';
-    els.osmMap.style.display = 'none';
-    var g = window.google;
+    if (els.leafletMap) els.leafletMap.style.display = 'none';
     if (!state.map) {
       state.map = new g.maps.Map(els.googleMap, {
         center: { lat: state.location.lat, lng: state.location.lon },
-        zoom: 11,
+        zoom: 12,
         mapTypeId: 'terrain',
         streetViewControl: false,
         fullscreenControl: true,
         mapTypeControl: true,
-        mapTypeControlOptions: { mapTypeIds: ['roadmap', 'terrain', 'satellite'] },
-        gestureHandling: 'greedy',
+        mapTypeControlOptions: { mapTypeIds: ['roadmap', 'terrain', 'hybrid'], style: g.maps.MapTypeControlStyle.DROPDOWN_MENU },
+        gestureHandling: 'cooperative',
         clickableIcons: false
       });
-    } else {
-      state.map.setCenter({ lat: state.location.lat, lng: state.location.lon });
+      state.map.addListener('dragstart', function () { if (tracker.active) followMe = false; });
     }
-    /* clear markers */
-    state.markers.forEach(function (m) { if (m.setMap) m.setMap(null); });
-    state.markers = [];
-    /* center marker */
-    state.markers.push(new g.maps.Marker({
+    /* pins */
+    gOv.pins.forEach(function (m) { m.setMap(null); });
+    gOv.pins = [];
+    gOv.pins.push(new g.maps.Marker({
       map: state.map, position: { lat: state.location.lat, lng: state.location.lon },
-      title: state.location.label,
+      title: state.location.label, zIndex: 5,
       icon: { path: g.maps.SymbolPath.CIRCLE, scale: 7, fillColor: '#f59e0b', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }
     }));
-    state.trails.slice(0, 40).forEach(function (t) {
-      state.markers.push(new g.maps.Marker({
-        map: state.map,
-        position: { lat: t.lat, lng: t.lon },
-        title: t.name,
+    var bounds = new g.maps.LatLngBounds();
+    bounds.extend({ lat: state.location.lat, lng: state.location.lon });
+    pinTrails().forEach(function (t, i) {
+      var mk = new g.maps.Marker({
+        map: state.map, position: { lat: t.lat, lng: t.lon }, title: t.name, zIndex: 10,
         label: { text: state.mode === 'bike' ? '🚴' : '🥾', fontSize: '14px' }
-      }));
+      });
+      mk.addListener('click', function () { openDetails(t); });
+      gOv.pins.push(mk);
+      if (i < 25) bounds.extend({ lat: t.lat, lng: t.lon });
     });
-    /* live tracker path (if any) */
-    if (tracker.path.length > 1 && g.maps.Polyline) {
-      state.markers.push(new g.maps.Polyline({
-        map: state.map,
-        path: tracker.path,
-        strokeColor: '#16a34a', strokeOpacity: .95, strokeWeight: 5
-      }));
+    /* fit the view once per loaded area (not while you’re tracking) */
+    var key = areaKey();
+    if (key !== fittedKey && !tracker.active) {
+      fittedKey = key;
+      if (gOv.pins.length > 1) {
+        state.map.fitBounds(bounds, 36);
+        g.maps.event.addListenerOnce(state.map, 'idle', function () { if (state.map.getZoom() > 14) state.map.setZoom(14); });
+      } else {
+        state.map.setCenter({ lat: state.location.lat, lng: state.location.lon });
+        state.map.setZoom(12);
+      }
     }
-    els.mapCaption.textContent = 'Map © Google · trail markers show route start points';
+    drawGoogleOverlays();
+    setMapCaption(mapCaptionText('google'));
   }
 
-  function renderMap() {
-    if (state.mapLib === 'google' && window.google && window.google.maps) { renderGoogleMap(); return; }
-    if (!hasGoogleKey()) { renderOSMMap(); return; }
-    if (gmapsLoaded === 'failed') { renderOSMMap(); return; }
-    if (gmapsLoaded === true) { renderGoogleMap(); return; }
+  function drawGoogleOverlays() {
+    var g = window.google;
+    if (!g || !state.map) return;
+    /* planned loop */
+    if (loopPath && loopPath.length > 1) {
+      if (!gOv.loop) gOv.loop = new g.maps.Polyline({ strokeColor: '#7c3aed', strokeOpacity: .85, strokeWeight: 5, zIndex: 15 });
+      gOv.loop.setPath(loopPath);
+      gOv.loop.setMap(state.map);
+    } else if (gOv.loop) gOv.loop.setMap(null);
+    /* live track */
+    if (tracker.path.length > 1) {
+      if (!gOv.track) gOv.track = new g.maps.Polyline({ strokeColor: '#16a34a', strokeOpacity: .95, strokeWeight: 6, zIndex: 20 });
+      gOv.track.setPath(tracker.path.map(function (p) { return { lat: p.lat, lng: p.lng }; }));
+      gOv.track.setMap(state.map);
+    } else if (gOv.track) gOv.track.setMap(null);
+    /* you */
+    if (tracker.active && tracker.lastFix) {
+      var pos = { lat: tracker.lastFix.lat, lng: tracker.lastFix.lng };
+      if (!gOv.me) {
+        gOv.me = new g.maps.Marker({
+          zIndex: 30, title: 'You',
+          icon: { path: g.maps.SymbolPath.CIRCLE, scale: 8, fillColor: '#2563eb', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 }
+        });
+      }
+      gOv.me.setPosition(pos);
+      gOv.me.setMap(state.map);
+      if (followMe) {
+        if (state.map.getZoom() < 15) state.map.setZoom(16);
+        state.map.panTo(pos);
+      }
+    } else if (gOv.me) gOv.me.setMap(null);
+  }
 
-    /* load the Google Maps script once — eagerly, Google is the primary map */
-    gmapsLoaded = 'loading';
-    window.gm_authFailure = function () {
-      gmapsLoaded = 'failed';
-      renderOSMMap();
-    };
-    var s = document.createElement('script');
-    s.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(cfg.googleMapsApiKey) + '&v=weekly';
-    s.async = true; s.defer = true;
-    s.onload = function () {
-      if (!window.google || !window.google.maps) { gmapsLoaded = 'failed'; renderOSMMap(); return; }
-      gmapsLoaded = true;
-      try { renderGoogleMap(); } catch (e) { gmapsLoaded = 'failed'; renderOSMMap(); }
-    };
-    s.onerror = function () { gmapsLoaded = 'failed'; renderOSMMap(); };
-    document.head.appendChild(s);
-    /* if google is slow, show OSM meanwhile, then swap when ready */
-    setTimeout(function () { if (gmapsLoaded === 'loading' && state.mapLib == null) renderOSMMap(); }, 8000);
+  /* ---------------- Leaflet fallback ---------------- */
+  var leafletPromise = null;
+  function loadLeaflet() {
+    if (window.L && window.L.map) return Promise.resolve(window.L);
+    if (leafletPromise) return leafletPromise;
+    leafletPromise = new Promise(function (resolve, reject) {
+      var css = document.createElement('link');
+      css.rel = 'stylesheet';
+      css.href = cfg.leafletCss || 'vendor/leaflet/leaflet.css';
+      document.head.appendChild(css);
+      var s = document.createElement('script');
+      s.src = cfg.leafletJs || 'vendor/leaflet/leaflet.js';
+      s.async = true;
+      s.onload = function () { if (window.L && window.L.map) resolve(window.L); else reject(new Error('Leaflet missing')); };
+      s.onerror = function () { leafletPromise = null; reject(new Error('Leaflet failed to load')); };
+      document.head.appendChild(s);
+    });
+    return leafletPromise;
+  }
+
+  function renderLeafletMap() {
+    if (gmaps.status === 'ready') return;          /* Google is up — it wins */
+    loadLeaflet().then(function (L) {
+      if (gmaps.status === 'ready') return;
+      state.mapLib = 'leaflet';
+      els.googleMap.style.display = 'none';
+      els.leafletMap.style.display = 'block';
+      if (!lmap.map) {
+        lmap.map = L.map(els.leafletMap, { scrollWheelZoom: false, zoomControl: true, attributionControl: true });
+        var voyager = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+          subdomains: 'abcd', maxZoom: 20,
+          attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> © <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>'
+        });
+        var topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+          subdomains: 'abc', maxZoom: 17,
+          attribution: '© OpenStreetMap contributors, SRTM · style © <a href="https://opentopomap.org" target="_blank" rel="noopener">OpenTopoMap</a> (CC-BY-SA)'
+        });
+        voyager.addTo(lmap.map);
+        L.control.layers({ 'Map': voyager, 'Terrain': topo }, null, { position: 'topright' }).addTo(lmap.map);
+        lmap.group = L.layerGroup().addTo(lmap.map);
+        lmap.map.on('dragstart', function () { if (tracker.active) followMe = false; });
+        lmap.map.setView([state.location.lat, state.location.lon], 12);
+      }
+      lmap.group.clearLayers();
+      L.circleMarker([state.location.lat, state.location.lon], { radius: 7, color: '#fff', weight: 2, fillColor: '#f59e0b', fillOpacity: 1 })
+        .bindTooltip(state.location.label).addTo(lmap.group);
+      var pts = [[state.location.lat, state.location.lon]];
+      pinTrails().forEach(function (t, i) {
+        var mk = L.marker([t.lat, t.lon], {
+          title: t.name,
+          icon: L.divIcon({ className: 'lf-pin', html: state.mode === 'bike' ? '🚴' : '🥾', iconSize: [26, 26], iconAnchor: [13, 13] })
+        }).addTo(lmap.group);
+        mk.on('click', function () { openDetails(t); });
+        if (i < 25) pts.push([t.lat, t.lon]);
+      });
+      var key = areaKey();
+      if (key !== fittedKey && !tracker.active) {
+        fittedKey = key;
+        if (pts.length > 1) lmap.map.fitBounds(pts, { padding: [28, 28], maxZoom: 14 });
+        else lmap.map.setView(pts[0], 12);
+      }
+      lmap.map.invalidateSize();
+      drawLeafletOverlays();
+      setMapCaption(mapCaptionText('leaflet'));
+    }).catch(function () {
+      setMapCaption('The map couldn’t load (offline?). Trails are still listed above.');
+    });
+  }
+
+  function drawLeafletOverlays() {
+    var L = window.L;
+    if (!L || !lmap.map) return;
+    if (loopPath && loopPath.length > 1) {
+      var ll = loopPath.map(function (p) { return [p.lat, p.lng]; });
+      if (!lOv.loop) lOv.loop = L.polyline(ll, { color: '#7c3aed', weight: 5, opacity: .85 }).addTo(lmap.map);
+      else lOv.loop.setLatLngs(ll).addTo(lmap.map);
+    } else if (lOv.loop) lOv.loop.remove();
+    if (tracker.path.length > 1) {
+      var tl = tracker.path.map(function (p) { return [p.lat, p.lng]; });
+      if (!lOv.track) lOv.track = L.polyline(tl, { color: '#16a34a', weight: 6, opacity: .95 }).addTo(lmap.map);
+      else lOv.track.setLatLngs(tl).addTo(lmap.map);
+    } else if (lOv.track) lOv.track.remove();
+    if (tracker.active && tracker.lastFix) {
+      var me = [tracker.lastFix.lat, tracker.lastFix.lng];
+      if (!lOv.me) lOv.me = L.circleMarker(me, { radius: 8, color: '#fff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).addTo(lmap.map);
+      else lOv.me.setLatLng(me).addTo(lmap.map);
+      if (followMe) lmap.map.setView(me, Math.max(lmap.map.getZoom(), 16));
+    } else if (lOv.me) lOv.me.remove();
+  }
+
+  /* live track / loop changed → redraw just the overlays */
+  function refreshMapOverlays() {
+    try {   /* a map hiccup must never break tracking or the assistant */
+      if (state.mapLib === 'google') drawGoogleOverlays();
+      else if (state.mapLib === 'leaflet') drawLeafletOverlays();
+      if (state.mapLib) setMapCaption(mapCaptionText(state.mapLib));
+    } catch (e) { if (window.console && console.warn) console.warn('map overlay update failed', e); }
+  }
+
+  function refreshMapSize() {
+    setTimeout(function () {
+      try {
+        if (state.mapLib === 'google' && state.map && window.google) window.google.maps.event.trigger(state.map, 'resize');
+        if (state.mapLib === 'leaflet' && lmap.map) lmap.map.invalidateSize();
+      } catch (e) { }
+      refreshMapOverlays();
+    }, 60);
+  }
+
+  function showLoopOnMap(path) {
+    loopPath = path && path.length > 1 ? path : null;
+    refreshMapOverlays();
+    if (!loopPath) return;
+    if (state.mapLib === 'google' && state.map && window.google) {
+      var b = new window.google.maps.LatLngBounds();
+      loopPath.forEach(function (p) { b.extend(p); });
+      state.map.fitBounds(b, 30);
+    } else if (state.mapLib === 'leaflet' && lmap.map) {
+      lmap.map.fitBounds(loopPath.map(function (p) { return [p.lat, p.lng]; }), { padding: [24, 24] });
+    }
+  }
+
+  /* polyline6 (TrailSplits routes) → [{lat,lng}] */
+  function decodePolyline(str, precision) {
+    var index = 0, lat = 0, lng = 0, out = [], factor = Math.pow(10, precision || 6);
+    while (str && index < str.length) {
+      var b, shift = 0, result = 0;
+      do { b = str.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20 && index < str.length);
+      lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+      shift = 0; result = 0;
+      do { b = str.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20 && index < str.length);
+      lng += (result & 1) ? ~(result >> 1) : (result >> 1);
+      out.push({ lat: lat / factor, lng: lng / factor });
+    }
+    return out;
   }
 
   /* ============================================================
      LIVE TRACKER — records REAL movement only.
 
-     “Phantom distance” (phone sitting on a desk still logging 0.2 mi)
-     comes from GPS jitter. These gates kill it:
-       1. accuracy gate  — fixes with accuracy worse than 25 m are ignored
-       2. movement gate  — a fix must be ≥ 8 m (hike) / 12 m (bike) from the
-                          last accepted point to count as movement
-       3. speed gate     — implied speed > 6 m/s (hike) / 15 m/s (bike) is a
-                          GPS jump and is discarded
-       4. stationary detector — no accepted movement for 60 s ⇒ auto-pause
-                          (shown live in the panel), resumes when you move
-     Distance = sum of accepted segments only. Tracking runs ONLY after you
-     tap “Track hike” — never in the background.
+     “Phantom distance” (phone on a desk logging 0.2 mi) is GPS jitter:
+     indoors a stationary phone’s fixes wander 10–30 m while reporting
+     ±15–20 m accuracy. These gates kill it:
+       1. accuracy gate   — fixes worse than ±20 m are ignored
+       2. smoothing       — movement is measured on the accuracy-weighted
+                            average of the last 5 fixes (random jitter
+                            cancels out; real walking barely changes)
+       3. jitter circle   — while you stand still the app keeps averaging
+                            “where you are”; you must leave that spot by
+                            more than the combined GPS uncertainty
+                            (√(a1²+a2²)·1.2, at least 10 m / 15 m)
+       4. still sensor    — if the phone itself reports ~0 speed, the
+                            move must be twice that big
+       5. confirmation    — two consecutive readings must agree you left
+                            and keep moving away (a random jump never counts)
+       6. spike filter    — a jump faster than 6 m/s hiking / 18 m/s biking
+                            is a GPS glitch and is discarded
+       7. auto-pause      — 45 s without counted movement pauses the clock
+     Your own Pause is a real pause: walking while paused adds nothing.
+     Tracking runs ONLY after you tap “Track hike” — never in the background.
      ============================================================ */
-  var MIN_MOVE = { hike: 8, bike: 12 };      /* metres */
-  var MAX_SPEED = { hike: 6, bike: 15 };     /* m/s */
-  var ACCURACY_MAX = 25;                     /* metres */
-  var STATIONARY_MS = 60000;
+  var MIN_MOVE = { hike: 10, bike: 15 };     /* metres — floor of the jitter circle */
+  var MAX_SPEED = { hike: 6, bike: 18 };     /* m/s */
+  var ACCURACY_MAX = 20;                     /* metres */
+  var STATIONARY_MS = 45000;
+  var USE_MILES = /-(US|LR|MM)$/i.test(navigator.language || '');
 
   var tracker = {
-    active: false, paused: false, watchId: null,
-    path: [],                    /* accepted {lat, lng, t} */
+    active: false, userPaused: false, autoPaused: false, watchId: null,
+    path: [],                    /* counted points {lat, lng, t} */
     distance: 0, elapsedMs: 0,
-    lastAccepted: null, lastMoveAt: 0, timer: null,
-    rejected: 0
+    lastCounted: null,           /* distance is summed from here */
+    anchor: null,                /* averaged “where you stand” for the movement test */
+    jumps: 0,
+    candidate: null,             /* first reading outside the jitter circle, awaiting confirmation */
+    recent: [],                  /* last good fixes, for smoothing */
+    lastFix: null,               /* latest usable fix (map “you” dot) */
+    lastMoveAt: 0, timer: null, rejected: 0
   };
 
   var trackEls = {
     btn: qs('#trackBtn'), panel: qs('#trackPanel'), btnLabel: qs('#trackBtnLabel'),
     dist: qs('#trackDist'), time: qs('#trackTime'), speed: qs('#trackSpeed'),
     gps: qs('#trackGps'), note: qs('#trackNote'),
-    pause: qs('#trackPause'), stop: qs('#trackStop')
+    pause: qs('#trackPause'), stop: qs('#trackStop'), center: qs('#trackCenter')
   };
 
   function trackNote(msg) { if (trackEls.note) trackEls.note.textContent = msg; }
@@ -513,83 +802,160 @@
     return (h ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + String(sec).padStart(2, '0');
   }
 
+  function fmtTrackDist(m) {
+    if (USE_MILES) { var mi = m / 1609.344; return (mi < 10 ? mi.toFixed(2) : mi.toFixed(1)) + ' mi'; }
+    var km = m / 1000;
+    return (km < 10 ? km.toFixed(2) : km.toFixed(1)) + ' km';
+  }
+
   function renderTrackStats() {
     if (!trackEls.dist) return;
-    var km = tracker.distance / 1000;
-    trackEls.dist.textContent = (km < 10 ? km.toFixed(2) : km.toFixed(1)) + ' km';
+    trackEls.dist.textContent = fmtTrackDist(tracker.distance);
     trackEls.time.textContent = fmtClock(tracker.elapsedMs);
     var hrs = tracker.elapsedMs / 3600000;
-    trackEls.speed.textContent = (hrs > 0 ? (km / hrs).toFixed(1) : '0.0') + ' km/h';
+    var v = hrs > 0 ? (tracker.distance / (USE_MILES ? 1609.344 : 1000)) / hrs : 0;
+    trackEls.speed.textContent = v.toFixed(1) + (USE_MILES ? ' mph' : ' km/h');
+  }
+
+  function setPauseLabel() {
+    if (trackEls.pause) trackEls.pause.textContent = tracker.userPaused ? 'Resume' : 'Pause';
   }
 
   function trackerTimerTick() {
-    if (tracker.active && !tracker.paused) {
+    if (!tracker.active || tracker.userPaused) return;
+    if (!tracker.autoPaused && tracker.lastMoveAt && Date.now() - tracker.lastMoveAt > STATIONARY_MS) {
+      tracker.autoPaused = true;
+      trackNote('You seem to be standing still — the clock is paused. It resumes by itself when you really move.');
+    }
+    if (!tracker.autoPaused) {
       tracker.elapsedMs += 1000;
-      /* stationary detector */
-      if (tracker.lastMoveAt && Date.now() - tracker.lastMoveAt > STATIONARY_MS) {
-        tracker.paused = true;
-        trackEls.pause.textContent = 'Resume';
-        trackNote('You seem to be standing still — distance paused. It resumes automatically when you really move.');
-      }
       renderTrackStats();
     }
+  }
+
+  /* accuracy-weighted average of the recent fixes (weights 1/acc²) */
+  function smoothedFix() {
+    var r = tracker.recent, sw = 0, la = 0, ln = 0, accSum = 0;
+    for (var i = 0; i < r.length; i++) {
+      var w = 1 / Math.max(1, r[i].acc * r[i].acc);
+      sw += w; la += r[i].lat * w; ln += r[i].lng * w; accSum += r[i].acc;
+    }
+    var last = r[r.length - 1];
+    return { lat: la / sw, lng: ln / sw, acc: accSum / r.length, t: last.t };
+  }
+
+  /* “where you are standing” — keeps averaging while you don’t move, so it
+     settles on your true position and desk jitter can’t escape it */
+  function newAnchor(p) {
+    var w = 1 / Math.max(1, p.acc * p.acc);
+    return { lat: p.lat, lng: p.lng, acc: p.acc, sw: w, sla: p.lat * w, sln: p.lng * w, accSum: p.acc, n: 1 };
+  }
+  function refineAnchor(a, p) {
+    var w = 1 / Math.max(1, p.acc * p.acc);
+    if (a.n >= 60) { var k = 59 / 60; a.sw *= k; a.sla *= k; a.sln *= k; a.accSum *= k; a.n = 59; }
+    a.sw += w; a.sla += p.lat * w; a.sln += p.lng * w; a.accSum += p.acc; a.n++;
+    a.lat = a.sla / a.sw; a.lng = a.sln / a.sw; a.acc = a.accSum / a.n;
   }
 
   function onTrackPosition(pos) {
     var c = pos.coords;
     if (trackEls.gps) trackEls.gps.textContent = '±' + Math.round(c.accuracy) + ' m';
     if (!tracker.active) return;
+    var fix = { lat: c.latitude, lng: c.longitude, t: pos.timestamp || Date.now(), acc: c.accuracy };
 
     /* gate 1: accuracy */
     if (c.accuracy > ACCURACY_MAX) {
       tracker.rejected++;
-      trackNote('Ignoring low-accuracy GPS fix (±' + Math.round(c.accuracy) + ' m) — move outdoors for a better signal.');
+      tracker.candidate = null;
+      trackNote('Weak GPS (±' + Math.round(c.accuracy) + ' m) — not counting distance until the signal improves. Outdoors works best.');
       return;
     }
 
-    var pt = { lat: c.latitude, lng: c.longitude, t: pos.timestamp || Date.now() };
+    /* gate 6: GPS spikes — an impossible jump from the previous fix is dropped;
+       three in a row means you really moved (lift, car): re-lock, add nothing */
+    var prev = tracker.recent[tracker.recent.length - 1];
+    if (prev) {
+      var rd = C.haversineM(prev.lat, prev.lng, fix.lat, fix.lng);
+      var rdt = Math.max(0.5, (fix.t - prev.t) / 1000);
+      if (rd / rdt > MAX_SPEED[state.mode] && rd > 2 * (prev.acc + fix.acc)) {
+        tracker.jumps = (tracker.jumps || 0) + 1;
+        if (tracker.jumps < 3) {
+          tracker.rejected++;
+          trackNote('Skipped a jumpy GPS point — it would have added fake distance.');
+          return;
+        }
+        tracker.recent = []; tracker.lastCounted = null; tracker.anchor = null; tracker.candidate = null;
+        trackNote('Big position change — re-locking your position (no distance added).');
+      }
+    }
+    tracker.jumps = 0;
+    tracker.lastFix = fix;
 
-    /* first point is the start anchor — no distance yet */
-    if (!tracker.lastAccepted) {
-      tracker.lastAccepted = pt;
-      tracker.path.push(pt);
+    /* gate 2: smoothing */
+    tracker.recent.push(fix);
+    if (tracker.recent.length > 5) tracker.recent.shift();
+    var here = smoothedFix();
+
+    /* start point once a few fixes agree — no distance yet */
+    if (!tracker.lastCounted) {
+      if (tracker.recent.length < 3) { trackNote('Locking your start point…'); refreshMapOverlays(); return; }
+      tracker.lastCounted = here;
+      tracker.anchor = newAnchor(here);
+      tracker.path.push(here);
       tracker.lastMoveAt = Date.now();
-      trackNote('Got it — start point locked. Walk or ride to record distance.');
+      trackNote('Start point locked. Walk or ride — only real movement is counted.');
+      refreshMapOverlays();
       return;
     }
 
-    var d = C.haversineM(tracker.lastAccepted.lat, tracker.lastAccepted.lng, pt.lat, pt.lng);
-
-    /* gate 2: movement (kills desk jitter) */
-    if (d < MIN_MOVE[state.mode]) {
-      if (tracker.paused && Date.now() - tracker.lastMoveAt > 3000) return;
-      return; /* still within jitter radius — not movement */
-    }
-
-    /* gate 3: teleport / speed */
-    var dt = (pt.t - tracker.lastAccepted.t) / 1000;
-    if (dt > 0 && d / dt > MAX_SPEED[state.mode]) {
-      tracker.rejected++;
-      trackNote('Skipped a jumpy GPS point — it would have added fake distance.');
+    /* gate 3 + 4: still inside the jitter circle around where you stand? */
+    var a = tracker.anchor;
+    var d = C.haversineM(a.lat, a.lng, here.lat, here.lng);
+    var need = Math.max(MIN_MOVE[state.mode] || 10, Math.sqrt(a.acc * a.acc + here.acc * here.acc) * 1.2);
+    var phoneSaysStill = typeof c.speed === 'number' && isFinite(c.speed) && c.speed >= 0 && c.speed < 0.3;
+    if (d < need || (phoneSaysStill && d < need * 2)) {
+      refineAnchor(a, here);
+      tracker.candidate = null;
+      refreshMapOverlays();
       return;
     }
 
-    /* accepted movement */
-    tracker.distance += d;
-    tracker.path.push(pt);
-    tracker.lastAccepted = pt;
+    /* gate 5: a second reading must confirm, and keep moving away */
+    var dc = C.haversineM(tracker.lastCounted.lat, tracker.lastCounted.lng, here.lat, here.lng);
+    if (!tracker.candidate || dc <= tracker.candidate.dc) { here.dc = dc; tracker.candidate = here; return; }
+    tracker.candidate = null;
+
+    if (tracker.userPaused) {         /* paused by you: move on, add nothing */
+      tracker.lastCounted = here;
+      tracker.anchor = newAnchor(here);
+      return;
+    }
+
+    tracker.distance += dc;           /* counted from the last counted point — nothing lost */
+    tracker.path.push(here);
+    tracker.lastCounted = here;
+    tracker.anchor = newAnchor(here);
     tracker.lastMoveAt = Date.now();
-    if (tracker.paused) {
-      tracker.paused = false;
-      trackEls.pause.textContent = 'Pause';
+    if (tracker.autoPaused) {
+      tracker.autoPaused = false;
       trackNote('Moving again — tracking.');
     }
     renderTrackStats();
-    if (state.mapLib === 'google' && window.google && state.map && state.markers.length) {
-      /* keep the live line fresh */
-      var line = state.markers[state.markers.length - 1];
-      if (line && line.setPath) line.setPath(tracker.path);
-      else renderMap();
+    refreshMapOverlays();
+  }
+
+  /* On Pause / Finish: count the last stretch you walked since the previous
+     counted point, if it clearly exceeds the GPS uncertainty. */
+  function commitPending() {
+    if (!tracker.lastCounted || !tracker.recent.length || tracker.userPaused) return;
+    var here = smoothedFix(), a = tracker.anchor || here;
+    var need = Math.max(MIN_MOVE[state.mode] || 10, Math.sqrt(a.acc * a.acc + here.acc * here.acc) * 1.2);
+    var dc = C.haversineM(tracker.lastCounted.lat, tracker.lastCounted.lng, here.lat, here.lng);
+    if (dc > need) {
+      tracker.distance += dc;
+      tracker.path.push(here);
+      tracker.lastCounted = here;
+      tracker.anchor = newAnchor(here);
     }
   }
 
@@ -598,32 +964,59 @@
       stopTracking(false);
       C.toast('Location permission denied — allow location to track your hike.');
     } else if (err.code === 2) { /* POSITION_UNAVAILABLE — usually: device location is OFF */
-      C.promptEnableLocation(function () { startTracking(); });
-      C.toast('Your device’s location is turned off — turn it on to track.', 4500);
       stopTracking(false);
-    } /* code 3 (timeout) — keep watching, next fix may come */
+      C.toast('Your device’s location is turned off — turn it on to track.', 4500);
+      C.promptEnableLocation(function () { startTracking(); });
+    } /* code 3 (timeout) — keep watching, the next fix may come */
+  }
+
+  /* phones: while tracking, dock the map right under the tracker panel */
+  var mapPanel = qs('.map-panel'), mapHome = null;
+  function dockMapForTracking(on) {
+    if (!mapPanel || !trackEls.panel) return;
+    var narrow = !window.matchMedia || window.matchMedia('(max-width: 979px)').matches;
+    if (on && narrow && !mapHome) {
+      mapHome = document.createComment('map-home');
+      mapPanel.parentNode.insertBefore(mapHome, mapPanel);
+      trackEls.panel.parentNode.insertBefore(mapPanel, trackEls.panel.nextSibling);
+      mapPanel.classList.add('is-docked');
+    } else if (!on && mapHome) {
+      mapHome.parentNode.insertBefore(mapPanel, mapHome);
+      mapHome.parentNode.removeChild(mapHome);
+      mapHome = null;
+      mapPanel.classList.remove('is-docked');
+    }
+    refreshMapSize();
   }
 
   function startTracking() {
     if (!navigator.geolocation) { C.toast('This browser can’t geolocate'); return; }
     tracker.active = true;
-    tracker.paused = false;
+    tracker.userPaused = false;
+    tracker.autoPaused = false;
     tracker.path = [];
     tracker.distance = 0;
     tracker.elapsedMs = 0;
-    tracker.lastAccepted = null;
+    tracker.anchor = null;
+    tracker.lastCounted = null;
+    tracker.candidate = null;
+    tracker.recent = [];
+    tracker.jumps = 0;
+    tracker.lastFix = null;
     tracker.lastMoveAt = Date.now();
     tracker.rejected = 0;
+    followMe = true;
     trackEls.panel.hidden = false;
     trackEls.btn.setAttribute('aria-pressed', 'true');
     trackEls.btn.classList.add('is-on');
     if (trackEls.btnLabel) trackEls.btnLabel.textContent = 'Stop tracking';
-    trackEls.pause.textContent = 'Pause';
+    setPauseLabel();
     trackNote('Waiting for GPS… Go outside for the best signal.');
     renderTrackStats();
+    dockMapForTracking(true);
     renderMap();
     tracker.watchId = navigator.geolocation.watchPosition(onTrackPosition, onTrackError, {
-      enableHighAccuracy: true, timeout: 30000, maximumAge: 1000
+      enableHighAccuracy: true, timeout: 30000, maximumAge: 0
     });
     if (!tracker.timer) tracker.timer = setInterval(trackerTimerTick, 1000);
     C.toast('Tracking started — distance only counts when you actually move.');
@@ -634,22 +1027,26 @@
       navigator.geolocation.clearWatch(tracker.watchId);
       tracker.watchId = null;
     }
+    var wasActive = tracker.active;
+    if (save && wasActive) commitPending();
     tracker.active = false;
     if (tracker.timer) { clearInterval(tracker.timer); tracker.timer = null; }
     trackEls.panel.hidden = true;
     trackEls.btn.setAttribute('aria-pressed', 'false');
     trackEls.btn.classList.remove('is-on');
-    if (trackEls.btnLabel) trackEls.btnLabel.textContent = 'Track hike';
-    if (save) {
+    if (trackEls.btnLabel) trackEls.btnLabel.textContent = state.mode === 'bike' ? 'Track ride' : 'Track hike';
+    dockMapForTracking(false);
+    if (save && wasActive) {
       var km = tracker.distance / 1000;
-      var summary = km.toFixed(2) + ' km in ' + fmtClock(tracker.elapsedMs);
+      var summary = fmtTrackDist(tracker.distance) + ' in ' + fmtClock(tracker.elapsedMs);
       try {
         var logs = JSON.parse(localStorage.getItem('calledit_tracks_v1') || '[]');
         logs.unshift({ km: Math.round(km * 1000) / 1000, ms: tracker.elapsedMs, at: Date.now(), mode: state.mode });
         localStorage.setItem('calledit_tracks_v1', JSON.stringify(logs.slice(0, 50)));
       } catch (e) { }
-      C.toast('Hike saved: ' + summary + ' 🎉');
+      C.toast((state.mode === 'bike' ? 'Ride' : 'Hike') + ' saved: ' + summary + ' 🎉');
     }
+    refreshMapOverlays();
   }
 
   if (trackEls.btn) trackEls.btn.addEventListener('click', function () {
@@ -657,17 +1054,29 @@
   });
   if (trackEls.pause) trackEls.pause.addEventListener('click', function () {
     if (!tracker.active) return;
-    tracker.paused = !tracker.paused;
-    trackEls.pause.textContent = tracker.paused ? 'Resume' : 'Pause';
-    if (tracker.paused) {
-      trackNote('Paused — GPS is still watched, but distance is frozen.');
+    if (!tracker.userPaused) commitPending();
+    tracker.userPaused = !tracker.userPaused;
+    tracker.candidate = null;
+    if (tracker.userPaused) {
+      trackNote('Paused — nothing is added while paused, even if you walk.');
     } else {
+      if (tracker.recent.length) {                 /* don’t count the paused stretch */
+        tracker.lastCounted = smoothedFix();
+        tracker.anchor = newAnchor(tracker.lastCounted);
+      }
+      tracker.autoPaused = false;
       tracker.lastMoveAt = Date.now();
       trackNote('Tracking again.');
     }
+    setPauseLabel();
     renderTrackStats();
   });
   if (trackEls.stop) trackEls.stop.addEventListener('click', function () { stopTracking(true); });
+  if (trackEls.center) trackEls.center.addEventListener('click', function () {
+    followMe = true;
+    refreshMapOverlays();
+    if (!tracker.lastFix) C.toast('Waiting for your first GPS fix…');
+  });
 
   /* ============================================================
      Weather
@@ -847,50 +1256,66 @@
     if (state.loading) return Promise.resolve();
     state.loading = true;
     state.location = { lat: lat, lon: lon, label: label, guessed: !!guessed };
-    els.trailList.innerHTML = '<div class="loading-state"><p class="loading-dots">Finding signed ' + (state.mode === 'bike' ? 'biking routes' : 'hiking trails') + '</p></div>';
+    els.trailList.innerHTML = '<div class="loading-state"><p class="loading-dots">Finding ' + (state.mode === 'bike' ? 'biking routes' : 'hiking trails') + '</p></div>';
     renderStatus();
-
-    var errors = [];
 
     var trailsP = fetchTrailsCombined(lat, lon, state.mode)
       .then(function (trails) { state.trails = trails; })
-      .catch(function () {
-        state.trails = [];
-        state.dataSource = '—';
-        errors.push('The trail providers are unreachable right now — check your connection and try again in a moment.');
-      });
+      .catch(function () { state.trails = []; state.dataSource = '—'; });
 
     var placesP = google.placesNearby(lat, lon, state.mode, label)
       .then(function (places) { state.googlePlaces = places; })
       .catch(function () { state.googlePlaces = []; });
 
-    var weatherP = ts.weather(lat, lon)
+    var weatherP = getForecast(lat, lon, 5)
       .then(function (w) { state.weather = w; })
       .catch(function () { state.weather = null; });
 
     return Promise.all([trailsP, placesP, weatherP]).then(function () {
       state.loading = false;
-      renderErrors(errors);
+      addGooglePlacesAsTrails();
+      renderErrors(state.trails.length ? [] : ['No trails could be loaded here — the trail services may be unreachable, or nothing is mapped nearby. Try a bigger nearby town, or ask the assistant to plan a loop.']);
       renderAll();
     });
+  }
+
+  /* Signed route relations (TrailSplits/OSM) are rare in many US areas, so
+     when only a few are found, Google’s “hiking area / park” results join
+     the list as trails too — with their rating and photo. */
+  function addGooglePlacesAsTrails() {
+    if (state.trails.length >= 8 || !state.googlePlaces.length) return;
+    attachGoogle();
+    var used = {};
+    state.trails.forEach(function (t) { if (t.google) used[t.google.id] = true; });
+    var added = 0;
+    state.googlePlaces.forEach(function (p) {
+      if (used[p.id] || p.lat == null) return;
+      state.trails.push({
+        id: 'g-' + p.id, osmId: null, name: p.name, ref: null, network: null,
+        routeType: state.mode === 'bike' ? 'bicycle' : 'hiking', distanceM: null,
+        lat: p.lat, lon: p.lon, source: 'Google Maps', google: p
+      });
+      added++;
+    });
+    if (!added) return;
+    state.dataSource = (state.dataSource === '—' || state.dataSource === '…') ? 'Google Maps' : state.dataSource + ' + Google Maps';
   }
 
   /* ============================================================
      Search + geolocation
      ============================================================ */
   function doSearch(q) {
-    if (!q || q.trim().length < 2) { C.toast('Type a place name first'); return; }
+    if (!q || q.trim().length < 2) { C.toast('Type a place name first'); return Promise.reject(new Error('empty search')); }
     els.statusLine.textContent = 'Looking up “' + q + '”…';
-    ts.geocode(q)
+    return ts.geocode(q)
       .catch(function () { return osm.geocode(q); })
       .then(function (loc) {
-        loadArea(loc.lat, loc.lon, loc.label, false);
-      })
-      .catch(function () {
-        renderAllStatusAfterFail();
+        return loadArea(loc.lat, loc.lon, loc.label, false).then(function () { return loc; });
+      }, function (err) {
+        renderStatus();
         C.toast('Couldn’t find “' + q + '”. Try a nearby town or region.');
+        throw err;
       });
-    function renderAllStatusAfterFail() { renderStatus(); }
   }
 
   function locateMe() {
@@ -1032,13 +1457,27 @@
   }
 
   /* ============================================================
-     TRAIL ASSISTANT (this page only)
+     TRAIL ASSISTANT (this page only) — Grok via Puter.js
+
+     • Every typed question (and every suggestion chip) goes to Grok.
+     • Grok can call real app tools (function calling): search the loaded
+       trails, trail details, weather, loop planning + outdoor places
+       (TrailSplits API), filter the list, switch area / activity, open a
+       trail, and read your tracked hikes.
+     • No API key: Puter’s user-pays model — the first question opens a
+       one-time free Puter sign-in (a guest account is created for you).
+     • If the AI is unreachable (offline, sign-in cancelled, allowance used
+       up) you get an answer from the trail data plus a Retry button.
      ============================================================ */
   var sheet = qs('#assistantSheet'), fab = qs('#assistantFab'),
     log = qs('#assistantLog'), form = qs('#assistantForm'),
-    input = qs('#assistantText'), suggest = qs('#assistantSuggest');
+    input = qs('#assistantText'), suggest = qs('#assistantSuggest'),
+    aiStatusEl = qs('#assistantStatus'), newChatBtn = qs('#assistantNew'),
+    sendBtn = form ? form.querySelector('button[type="submit"]') : null;
 
-  var SUGGESTIONS = ['Easiest trails', 'Top rated', 'Weather this week', 'Under 8 km', 'Longest routes', 'What can you do?'];
+  var SUGGESTIONS = ['Easiest trails here', 'Plan a 5 km loop near me', 'Weather this week?', 'Where can I park & get water?', 'Best trail for a sunset', 'What can you do?'];
+  var MAX_TOOL_ROUNDS = 4;
+  var ai = { history: [], busy: false, model: null };
 
   function botSay(html, actions) {
     var div = document.createElement('div');
@@ -1059,6 +1498,7 @@
     }
     log.appendChild(div);
     log.scrollTop = log.scrollHeight;
+    return div;
   }
 
   function userSay(text) {
@@ -1070,114 +1510,623 @@
   }
 
   function trailLine(t, withDist) {
-    var s = '• <b>' + esc(t.name) + '</b> — ' + (t.distanceM != null ? C.fmtKm(t.distanceM) : 'length unlisted');
+    var s = '• <b>' + esc(t.name) + '</b> — ' + (t.distanceM != null ? C.fmtBoth(t.distanceM) : 'length unlisted');
     if (withDist) s += ', ' + C.fmtKm(C.haversineM(state.location.lat, state.location.lon, t.lat, t.lon)) + ' from center';
     if (t.google && t.google.rating != null) s += ' · ★ ' + t.google.rating.toFixed(1);
     return s;
   }
 
-  /* ============================================================
-     FREE-FORM AI — Grok (xAI) answers any custom question, grounded
-     in the trails actually loaded on this page. Falls back to a
-     data-driven local answer when no key is set or the call fails.
-     ============================================================ */
-  function postJSONsmart(url, body, headers, timeoutMs) {
-    return fetchJSON(url, { method: 'POST', headers: headers, body: JSON.stringify(body) }, timeoutMs)
-      .catch(function () {
-        var proxied = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
-        return fetchJSON(proxied, {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify(body)
-        }, (timeoutMs || 20000) + 10000);
-      });
-  }
-
+  /* Markdown-lite → safe HTML (bold, italics, code, links, bullet/numbered lists) */
   function formatReply(text) {
-    return esc(text)
-      .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/\n/g, '<br>');
+    function inline(s) {
+      return esc(s)
+        .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+        .replace(/__(.+?)__/g, '<b>$1</b>')
+        .replace(/(^|[\s(])\*(?!\s)([^*\n]+?)\*(?=[\s).,!?:;]|$)/g, '$1<i>$2</i>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    }
+    var out = [], listType = null;
+    function closeList() { if (listType) { out.push('</' + listType + '>'); listType = null; } }
+    String(text || '').replace(/\r/g, '').split('\n').forEach(function (line) {
+      var t = line.trim();
+      var bullet = t.match(/^[-*•]\s+(.*)$/), num = t.match(/^\d+[.)]\s+(.*)$/), head = t.match(/^#{1,6}\s+(.*)$/);
+      if (bullet || num) {
+        var want = bullet ? 'ul' : 'ol';
+        if (listType !== want) { closeList(); out.push('<' + want + '>'); listType = want; }
+        out.push('<li>' + inline((bullet || num)[1]) + '</li>');
+        return;
+      }
+      closeList();
+      if (!t) { out.push('<br>'); return; }
+      if (head) { out.push('<b>' + inline(head[1]) + '</b><br>'); return; }
+      out.push(inline(t) + '<br>');
+    });
+    closeList();
+    return out.join('').replace(/(<br>){3,}/g, '<br><br>').replace(/^(<br>)+|(<br>)+$/g, '');
   }
 
-  function typingIndicator() {
+  function typingIndicator(label) {
     var div = document.createElement('div');
     div.className = 'msg msg--bot msg--typing';
-    div.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
+    div.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="typing-label"></span>';
+    var lab = div.querySelector('.typing-label');
+    div.setLabel = function (txt) { lab.textContent = txt || ''; log.scrollTop = log.scrollHeight; };
+    div.setLabel(label);
     log.appendChild(div);
     log.scrollTop = log.scrollHeight;
     return div;
   }
 
-  function buildTrailContext() {
-    var lines = state.trails.slice(0, 30).map(function (t, i) {
-      var bits = [i + 1 + '. ' + t.name];
-      if (t.distanceM != null) bits.push((t.distanceM / 1000).toFixed(1) + ' km');
-      if (t.google && t.google.rating != null) bits.push('Google ' + t.google.rating.toFixed(1) + '★ (' + t.google.count + ' reviews)');
-      bits.push('type: ' + (t.routeType === 'bicycle' || t.routeType === 'mtb' ? 'biking' : 'hiking'));
-      if (t.network) bits.push('network: ' + t.network);
-      bits.push('start: ' + t.lat.toFixed(4) + ',' + t.lon.toFixed(4));
-      return bits.join(' · ');
+  function setComposerBusy(on) {
+    if (sendBtn) { sendBtn.disabled = on; sendBtn.textContent = on ? '…' : 'Send'; }
+  }
+
+  /* ---------------- Puter.js (loaded only when the assistant is used) ---------------- */
+  var puterPromise = null;
+  function loadPuter() {
+    if (window.puter && window.puter.ai && window.puter.auth) return Promise.resolve(window.puter);
+    if (puterPromise) return puterPromise;
+    puterPromise = new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = (cfg.ai && cfg.ai.puterJs) || 'https://js.puter.com/v2/';
+      s.async = true;
+      var timer = setTimeout(function () { fail(new Error('Puter.js took too long to load')); }, 25000);
+      function fail(err) { clearTimeout(timer); puterPromise = null; reject(err); }
+      s.onload = function () {
+        clearTimeout(timer);
+        if (window.puter && window.puter.ai && window.puter.auth) { resolve(window.puter); renderAiStatus(); }
+        else fail(new Error('Puter.js loaded but isn’t usable'));
+      };
+      s.onerror = function () { fail(new Error('Couldn’t download Puter.js — are you offline?')); };
+      document.head.appendChild(s);
     });
-    var wtxt = '';
-    try {
-      var days = state.weather && state.weather.points && state.weather.points[0] && state.weather.points[0].days;
-      if (days && days.length) {
-        wtxt = ' Weather now/next days: ' + days.slice(0, 3).map(function (d) {
-          var info = wmoInfo(d.weather_code);
-          return d.date + ' ' + info.label + ' ' + (d.temp_max_c != null ? Math.round(d.temp_max_c) : '?') + '°C';
-        }).join('; ') + '.';
-      }
-    } catch (e) { }
-    return 'You are the CalledIt trail assistant for ' + state.location.label +
-      ' (' + state.location.lat.toFixed(4) + ', ' + state.location.lon.toFixed(4) + '). ' +
-      'The user is browsing ' + (state.mode === 'bike' ? 'biking routes' : 'hiking trails') + '. ' +
-      'Data source: ' + state.dataSource + '. There are ' + state.trails.length + ' signed routes loaded:' +
-      (lines.length ? '\n' + lines.join('\n') : ' (none)') + '.' + wtxt +
-      ' Answer the user\'s questions in a friendly, concise way (2-6 sentences unless asked for more). ' +
-      'Use the data above when relevant (names, distances, ratings). If asked something outside trail/hiking knowledge, still answer helpfully.';
+    return puterPromise;
   }
 
-  function askGrok(q) {
-    var key = (cfg.grokApiKey || '').trim();
-    if (!key) return Promise.reject({ noKey: true });
-    var models = [cfg.grokModel].concat(cfg.grokModelFallbacks || []);
-    var body = {
-      model: models[0],
-      messages: [
-        { role: 'system', content: buildTrailContext() },
-        { role: 'user', content: q }
-      ],
-      temperature: 0.6,
-      max_tokens: 700
-    };
-    var headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key };
+  function puterSignedIn() {
+    var p = window.puter;
+    try { return !!(p && p.auth && p.auth.isSignedIn()); } catch (e) { return false; }
+  }
 
-    function tryModel(i) {
-      if (i >= models.length) return Promise.reject(new Error('all models failed'));
-      body.model = models[i];
-      return postJSONsmart(cfg.grokApi, body, headers, 25000)
-        .then(function (json) {
-          var msg = json && json.choices && json.choices[0] && json.choices[0].message;
-          var content = msg && msg.content;
-          if (!content) throw new Error('empty reply');
-          return content;
-        })
-        .catch(function (err) {
-          if (err && err.status && (err.status === 404 || err.status === 400 || err.status === 422)) {
-            return tryModel(i + 1);   /* model name not available on this account */
-          }
-          return Promise.reject(err);
-        });
+  function modelLabel(id) {
+    var m = ((cfg.ai && cfg.ai.models) || []).filter(function (x) { return x.id === id; })[0];
+    return m ? m.label.split(' — ')[0] : String(id || '').replace(/^x-ai\//, '');
+  }
+
+  function renderAiStatus() {
+    if (!aiStatusEl) return;
+    var model = ai.model || (cfg.ai && cfg.ai.model);
+    aiStatusEl.textContent = modelLabel(model) + ' by xAI · via Puter' + (puterSignedIn() ? ' · connected' : ' · free, no key');
+  }
+
+  function modelChain() {
+    var chosen = (cfg.ai && cfg.ai.model) || 'x-ai/grok-4-1-fast-non-reasoning';
+    var list = [chosen].concat((cfg.ai && cfg.ai.fallbackModels) || []);
+    return list.filter(function (m, i) { return m && list.indexOf(m) === i; });
+  }
+
+  function errText(err) {
+    if (!err) return 'unknown error';
+    if (typeof err === 'string') return err;
+    if (err.message) return String(err.message);
+    if (err.error && typeof err.error === 'object' && err.error.message) return String(err.error.message);
+    if (err.msg) return String(err.msg);
+    if (typeof err.error === 'string') return err.error;
+    try { return JSON.stringify(err).slice(0, 180); } catch (e) { return String(err); }
+  }
+  function errCode(err) {
+    if (!err || typeof err !== 'object') return '';
+    return String(err.code || (err.error && (err.error.code || (typeof err.error === 'string' ? err.error : ''))) || err.status || '');
+  }
+  function isAuthError(err) {
+    return /auth_canceled|auth_window_closed|popup_blocked|unsupported_origin|reauth_required|token_auth_failed/i.test(errCode(err) + ' ' + errText(err));
+  }
+  function isQuotaError(err) {
+    return /insufficient_funds|subscription_required|402|usage.?limit|allowance/i.test(errCode(err) + ' ' + errText(err));
+  }
+
+  /* one Grok call through Puter, walking the model fallback chain */
+  function grokChat(messages, withTools) {
+    var models = modelChain(), lastErr = null;
+    function attempt(i) {
+      if (i >= models.length) return Promise.reject(lastErr || new Error('No Grok model answered'));
+      var opts = { model: models[i], normalize: true };   /* no temperature: some Grok reasoning models reject it */
+      if (withTools) opts.tools = TOOL_DEFS;
+      return Promise.resolve().then(function () { return window.puter.ai.chat(messages, opts); }).then(function (res) {
+        if (!res || !res.message) throw new Error('Empty reply from Grok');
+        ai.model = models[i];
+        return res;
+      }, function (err) {
+        lastErr = err;
+        if (isAuthError(err) || isQuotaError(err)) throw err;   /* another model won’t help */
+        return attempt(i + 1);
+      });
     }
-    return tryModel(0);
+    return attempt(0);
   }
 
-  /* Local data-driven answers for when Grok isn’t configured/reachable.
-     These use the ACTUAL trails on the page — not canned facts. */
+  function textOf(content) {
+    if (content == null) return '';
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+      return content.map(function (p) { return typeof p === 'string' ? p : (p && (p.text || p.content)) || ''; }).join('');
+    }
+    if (typeof content === 'object' && content.text) return String(content.text);
+    return String(content);
+  }
+
+  /* ---------------- tools Grok can call ---------------- */
+  var TOOL_DEFS = [
+    fn('search_trails', 'Search the trails/routes currently loaded in the app around the area the user is viewing. Use for questions about which trails exist, lengths, ratings, nearest, easiest, longest. Returns trail ids for the other tools.', {
+      query: { type: 'string', description: 'Optional words that must appear in the trail name, e.g. "lake"' },
+      min_km: { type: 'number', description: 'Minimum length in km' },
+      max_km: { type: 'number', description: 'Maximum length in km' },
+      min_rating: { type: 'number', description: 'Minimum Google rating (1-5)' },
+      sort: { type: 'string', enum: ['nearest', 'shortest', 'longest', 'top_rated'] },
+      limit: { type: 'integer', description: 'How many results (default 8, max 20)' }
+    }),
+    fn('get_trail_details', 'Full details for one loaded trail: length, climb/descent, estimated time, route endpoints, operator, description, Google rating, coordinates.', {
+      trail_id: { type: 'string', description: 'id from search_trails or the trail list in the system message' }
+    }, ['trail_id']),
+    fn('get_weather', 'Daily weather forecast (up to 7 days) for the current area, a loaded trail, or any named place.', {
+      trail_id: { type: 'string', description: 'Forecast at this trail’s start' },
+      place: { type: 'string', description: 'Any place name, e.g. "Zion National Park"' },
+      days: { type: 'integer', description: '1-7, default 5' }
+    }),
+    fn('plan_loop_route', 'Plan a real round-trip loop (starts and ends at the same point) on mapped paths with the TrailSplits router, and draw it on the app map. Works anywhere, including places with few official trails.', {
+      distance_km: { type: 'number', description: 'Target loop length in km (0.5-40 on foot, up to 60 by bike)' },
+      start: { type: 'string', description: '"my_location" (user GPS), "area_center" (default), or a trail_id to start at that trail' },
+      profile: { type: 'string', enum: ['hike', 'run', 'bike'] },
+      max_difficulty: { type: 'integer', description: 'Hiking only: hardest SAC grade allowed, 1 (easy) to 6 (alpine). Default 3.' }
+    }, ['distance_km']),
+    fn('find_places_nearby', 'Find mapped parking, drinking water, toilets, shelters/huts, viewpoints, peaks or bus stops near a trail or the area centre (OpenStreetMap data via TrailSplits).', {
+      kinds: { type: 'array', items: { type: 'string', enum: ['parking', 'water', 'toilets', 'shelter', 'hut', 'viewpoint', 'peak', 'bus_stop', 'spring'] }, description: 'What to look for' },
+      trail_id: { type: 'string', description: 'Search around this trail’s start (otherwise the area centre)' },
+      radius_km: { type: 'number', description: 'Search radius, default 2, max 10' }
+    }, ['kinds']),
+    fn('update_trail_list', 'Filter/sort the trail list the user sees on screen (also updates the map pins).', {
+      sort: { type: 'string', enum: ['nearest', 'shortest', 'longest', 'top_rated'] },
+      max_km: { type: 'number', description: 'Only trails up to this length (km); 0 removes the limit' },
+      min_rating: { type: 'number', description: 'Only trails with at least this Google rating; 0 removes it' },
+      easy_only: { type: 'boolean', description: 'Only short/easy routes' },
+      clear: { type: 'boolean', description: 'Remove all filters first' }
+    }),
+    fn('change_area', 'Move the app to another place (or to the user’s GPS position) and load its trails. Use when the user asks about trails somewhere else.', {
+      place: { type: 'string', description: 'Place name, e.g. "Boulder, Colorado"' },
+      use_my_location: { type: 'boolean', description: 'Use the device GPS position instead of a place name' }
+    }),
+    fn('set_activity', 'Switch the app between hiking trails and biking routes (reloads the list).', {
+      mode: { type: 'string', enum: ['hike', 'bike'] }
+    }, ['mode']),
+    fn('open_trail', 'Open a trail’s details sheet on screen (photos, elevation profile, directions buttons).', {
+      trail_id: { type: 'string' }
+    }, ['trail_id']),
+    fn('get_my_activity', 'The user’s own saved hikes/rides tracked in this app (distance, time, dates) and litter-pickup points.', {})
+  ];
+
+  function fn(name, description, props, required) {
+    return {
+      type: 'function',
+      function: { name: name, description: description, parameters: { type: 'object', properties: props || {}, required: required || [] } }
+    };
+  }
+
+  var TOOL_LABELS = {
+    search_trails: 'Searching the trails…', get_trail_details: 'Reading trail details…', get_weather: 'Checking the forecast…',
+    plan_loop_route: 'Planning a loop with TrailSplits…', find_places_nearby: 'Looking for parking, water & more…',
+    update_trail_list: 'Updating your list…', change_area: 'Loading trails there…', set_activity: 'Switching activity…',
+    open_trail: 'Opening the trail…', get_my_activity: 'Reading your tracked hikes…'
+  };
+
+  function round1(n) { return n == null || isNaN(n) ? null : Math.round(n * 10) / 10; }
+  function kmMi(m) { return m == null ? null : { km: round1(m / 1000), mi: round1(m / 1609.344) }; }
+  function findTrail(id) {
+    if (!id) return null;
+    var key = String(id).trim();
+    var t = state.trails.filter(function (x) { return x.id === key || String(x.osmId) === key; })[0];
+    if (!t) {
+      var low = key.toLowerCase();
+      t = state.trails.filter(function (x) { return x.name.toLowerCase() === low; })[0] ||
+        state.trails.filter(function (x) { return x.name.toLowerCase().indexOf(low) !== -1; })[0];
+    }
+    return t || null;
+  }
+  function trailBrief(t) {
+    var o = {
+      id: t.id, name: t.name,
+      type: t.routeType === 'bicycle' || t.routeType === 'mtb' ? 'biking' : 'hiking',
+      length: kmMi(t.distanceM),
+      est_time_min: estimateMinutes(t) != null ? Math.round(estimateMinutes(t)) : null,
+      from_area_center_km: round1(C.haversineM(state.location.lat, state.location.lon, t.lat, t.lon) / 1000)
+    };
+    if (t.google && t.google.rating != null) { o.google_rating = t.google.rating; o.google_reviews = t.google.count; }
+    if (t.network) o.network = networkLabel(t.network) || t.network;
+    if (t.ref) o.ref = t.ref;
+    o.source = t.source;
+    return o;
+  }
+  function withTimeout(p, ms, label) {
+    return new Promise(function (resolve, reject) {
+      var done = false;
+      var tm = setTimeout(function () { if (!done) { done = true; reject(new Error((label || 'request') + ' timed out')); } }, ms);
+      p.then(function (v) { if (!done) { done = true; clearTimeout(tm); resolve(v); } },
+        function (e) { if (!done) { done = true; clearTimeout(tm); reject(e); } });
+    });
+  }
+  function waitForIdle() {
+    return new Promise(function (resolve) {
+      var start = Date.now();
+      (function poll() { if (!state.loading || Date.now() - start > 40000) resolve(); else setTimeout(poll, 250); })();
+    });
+  }
+  function areaSummary(extra) {
+    var o = {
+      area: state.location.label, lat: round1(state.location.lat * 1000) / 1000, lon: round1(state.location.lon * 1000) / 1000,
+      activity: state.mode === 'bike' ? 'biking' : 'hiking',
+      trails_loaded: state.trails.length, data_source: state.dataSource,
+      top_trails: filteredTrails().slice(0, 8).map(trailBrief)
+    };
+    if (extra) Object.keys(extra).forEach(function (k) { o[k] = extra[k]; });
+    return o;
+  }
+  function locateOnce() {
+    return new Promise(function (resolve, reject) {
+      if (!navigator.geolocation) { reject(new Error('This device can’t geolocate')); return; }
+      navigator.geolocation.getCurrentPosition(function (pos) {
+        resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy });
+      }, function (err) {
+        if (err && err.code === 2) C.promptEnableLocation(null);
+        reject(new Error(err && err.code === 1 ? 'location permission denied' : err && err.code === 2 ? 'device location is turned off' : 'GPS timeout'));
+      }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 120000 });
+    });
+  }
+  function weatherDays(w, n) {
+    var days = (w && w.points && w.points[0] && w.points[0].days) || [];
+    return days.slice(0, n || 5).map(function (d) {
+      var info = wmoInfo(d.weather_code);
+      var c2f = function (c) { return c == null ? null : Math.round(c * 9 / 5 + 32); };
+      return {
+        date: d.date,
+        weekday: new Date(d.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' }),
+        conditions: info.label,
+        high_c: d.temp_max_c != null ? Math.round(d.temp_max_c) : null, low_c: d.temp_min_c != null ? Math.round(d.temp_min_c) : null,
+        high_f: c2f(d.temp_max_c), low_f: c2f(d.temp_min_c),
+        rain_chance_pct: d.precip_probability_max_pct != null ? d.precip_probability_max_pct : null,
+        precip_mm: d.precip_mm != null ? round1(d.precip_mm) : null,
+        wind_max_kmh: d.wind_max_kmh != null ? Math.round(d.wind_max_kmh) : null,
+        gusts_kmh: d.gust_max_kmh != null ? Math.round(d.gust_max_kmh) : null
+      };
+    });
+  }
+
+  var TOOLS = {
+    search_trails: function (a) {
+      var list = state.trails.slice();
+      if (a.query) {
+        var words = String(a.query).toLowerCase().split(/\s+/).filter(Boolean);
+        list = list.filter(function (t) { var n = t.name.toLowerCase(); return words.every(function (w) { return n.indexOf(w) !== -1; }); });
+      }
+      if (a.min_km != null) list = list.filter(function (t) { return t.distanceM != null && t.distanceM >= a.min_km * 1000; });
+      if (a.max_km != null && a.max_km > 0) list = list.filter(function (t) { return t.distanceM != null && t.distanceM <= a.max_km * 1000; });
+      if (a.min_rating) list = list.filter(function (t) { return t.google && t.google.rating != null && t.google.rating >= a.min_rating; });
+      var dist = function (t) { return C.haversineM(state.location.lat, state.location.lon, t.lat, t.lon); };
+      if (a.sort === 'shortest') list.sort(function (x, y) { return (x.distanceM || 9e9) - (y.distanceM || 9e9); });
+      else if (a.sort === 'longest') list.sort(function (x, y) { return (y.distanceM || 0) - (x.distanceM || 0); });
+      else if (a.sort === 'top_rated') list.sort(function (x, y) { return ((y.google && y.google.rating) || 0) - ((x.google && x.google.rating) || 0); });
+      else list.sort(function (x, y) { return dist(x) - dist(y); });
+      var limit = Math.max(1, Math.min(20, a.limit || 8));
+      return { area: state.location.label, total_matches: list.length, trails: list.slice(0, limit).map(trailBrief) };
+    },
+
+    get_trail_details: function (a) {
+      var t = findTrail(a.trail_id);
+      if (!t) return { error: 'No loaded trail matches "' + a.trail_id + '". Use search_trails first.' };
+      var out = trailBrief(t);
+      out.start = { lat: round1(t.lat * 1e5) / 1e5, lon: round1(t.lon * 1e5) / 1e5 };
+      if (t.google) { out.google_maps_url = t.google.gmapsUri || null; out.address = t.google.address || null; }
+      if (!t.osmId) return out;
+      return withTimeout(ts.relation(t.osmId), 9000, 'trail details').then(function (rel) {
+        var p = (rel && rel.properties) || {};
+        ['from', 'to', 'description', 'operator', 'website', 'roundtrip', 'symbol', 'osmc_symbol', 'name_en', 'note'].forEach(function (k) {
+          if (p[k] != null && p[k] !== '') out[k] = String(p[k]).slice(0, 300);
+        });
+        if (typeof p.ascent_m === 'number') out.climb_up_m = Math.round(p.ascent_m);
+        if (typeof p.descent_m === 'number') out.climb_down_m = Math.round(p.descent_m);
+        if (typeof p.distance_m === 'number' && t.distanceM == null) out.length = kmMi(p.distance_m);
+        return out;
+      }).catch(function () { return out; });
+    },
+
+    get_weather: function (a) {
+      var days = Math.max(1, Math.min(7, a.days || 5));
+      var t = a.trail_id ? findTrail(a.trail_id) : null;
+      var where;
+      if (t) where = Promise.resolve({ lat: t.lat, lon: t.lon, label: t.name });
+      else if (a.place) where = ts.geocode(a.place).catch(function () { return osm.geocode(a.place); });
+      else if (state.weather && days <= 5) return { place: state.location.label, source: 'Open-Meteo via TrailSplits', days: weatherDays(state.weather, days) };
+      else where = Promise.resolve({ lat: state.location.lat, lon: state.location.lon, label: state.location.label });
+      return where.then(function (loc) {
+        return getForecast(loc.lat, loc.lon, days).then(function (w) {
+          return { place: loc.label, source: (w.provider && w.provider.attribution) || 'Open-Meteo', days: weatherDays(w, days) };
+        });
+      }).catch(function (e) { return { error: 'Forecast unavailable: ' + errText(e) }; });
+    },
+
+    plan_loop_route: function (a) {
+      var profile = a.profile || (state.mode === 'bike' ? 'bike' : 'hike');
+      var maxKm = profile === 'bike' ? 60 : 40;
+      var km = Math.max(0.5, Math.min(maxKm, Number(a.distance_km) || 5));
+      var startP;
+      var t = a.start && a.start !== 'my_location' && a.start !== 'area_center' ? findTrail(a.start) : null;
+      if (a.start === 'my_location') {
+        startP = locateOnce().then(function (p) { return { lat: p.lat, lon: p.lon, label: 'your location' }; })
+          .catch(function () { return { lat: state.location.lat, lon: state.location.lon, label: state.location.label + ' (GPS unavailable — used the area centre)' }; });
+      } else if (t) startP = Promise.resolve({ lat: t.lat, lon: t.lon, label: t.name + ' (start)' });
+      else startP = Promise.resolve({ lat: state.location.lat, lon: state.location.lon, label: state.location.label });
+      return startP.then(function (start) {
+        var body = { start: [start.lon, start.lat], distance_km: km, profile: profile, alternatives: 1 };
+        if (profile !== 'bike' && a.max_difficulty) body.max_sac = Math.max(1, Math.min(6, Math.round(a.max_difficulty)));
+        return tsPost('/v1/roundtrips', body, 30000).then(function (res) {
+          var loops = (res && res.loops) || [];
+          if (!loops.length) return { error: 'TrailSplits found no good loop of ' + km + ' km from ' + start.label + '.' };
+          var best = loops[0];
+          var path = decodePolyline(best.shape, 6);
+          if (path.length > 1) showLoopOnMap(path);
+          return {
+            start: start.label, profile: profile, status: res.status, note: res.reason || null,
+            drawn_on_map: path.length > 1,
+            loops: loops.slice(0, 2).map(function (l) {
+              var time = l.time || {};
+              var mins = time.moving_s != null ? time.moving_s / 60 : time.duration_s != null ? time.duration_s / 60 : time.minutes != null ? time.minutes : null;
+              return {
+                rank: l.rank, length: kmMi(l.distance_m), target_off_by_pct: round1(l.target_error_pct),
+                climb_m: l.ascent_m != null ? Math.round(l.ascent_m) : null,
+                est_time_min: mins != null ? Math.round(mins) : null,
+                walked_twice_pct: l.repeated_share != null ? Math.round(l.repeated_share * 100) : null,
+                on_marked_trails_score: l.score && l.score.marked != null ? round1(l.score.marked) : null,
+                quality: l.status
+              };
+            })
+          };
+        });
+      }).catch(function (e) {
+        var msg = errText(e);
+        if (/422/.test(msg)) msg = 'no good loop of that length from there (try another distance or start)';
+        return { error: 'Loop planning failed: ' + msg };
+      });
+    },
+
+    find_places_nearby: function (a) {
+      var t = a.trail_id ? findTrail(a.trail_id) : null;
+      var lat = t ? t.lat : state.location.lat, lon = t ? t.lon : state.location.lon;
+      var r = Math.max(0.3, Math.min(10, a.radius_km || 2));
+      var dLat = r / 111, dLon = r / (111 * Math.max(0.2, Math.cos(lat * Math.PI / 180)));
+      var kinds = (a.kinds && a.kinds.length ? a.kinds : ['parking', 'water', 'toilets']).map(String);
+      var apiKinds = kinds.concat(kinds.indexOf('water') !== -1 ? ['drinking_water'] : []);
+      var url = cfg.trailsplitsApi + '/pois/v1/bbox?min_lat=' + (lat - dLat).toFixed(5) + '&max_lat=' + (lat + dLat).toFixed(5) +
+        '&min_lon=' + (lon - dLon).toFixed(5) + '&max_lon=' + (lon + dLon).toFixed(5) + '&limit=300&kind=' + encodeURIComponent(apiKinds.join(','));
+      return getJSONsmart(url, 15000).then(function (json) {
+        var feats = (json && json.features) || [];
+        var list = feats.map(function (f) {
+          return { kind: f.kind, name: f.name || null, km_away: round1(C.haversineM(lat, lon, f.lat, f.lon) / 1000), lat: f.lat, lon: f.lon };
+        }).sort(function (x, y) { return x.km_away - y.km_away; });
+        var byKind = {};
+        list.forEach(function (p) { byKind[p.kind] = (byKind[p.kind] || 0) + 1; });
+        return {
+          around: t ? t.name + ' (trail start)' : state.location.label, radius_km: r,
+          counts: byKind, nearest: list.slice(0, 15).map(function (p) { return { kind: p.kind, name: p.name, km_away: p.km_away }; }),
+          note: 'Mapped OpenStreetMap features — not a guarantee they are open or working.'
+        };
+      }).catch(function (e) { return { error: 'Places lookup failed: ' + errText(e) }; });
+    },
+
+    update_trail_list: function (a) {
+      var f = a.clear ? { maxKm: null, sort: 'near', easyOnly: false, minRating: null } : state.filter;
+      if (a.sort) f.sort = { nearest: 'near', shortest: 'short', longest: 'long', top_rated: 'rated' }[a.sort] || 'near';
+      if (a.max_km != null) f.maxKm = a.max_km > 0 ? a.max_km : null;
+      if (a.min_rating != null) f.minRating = a.min_rating > 0 ? a.min_rating : null;
+      if (a.easy_only != null) f.easyOnly = !!a.easy_only;
+      state.filter = f;
+      renderAll();
+      var shown = filteredTrails();
+      return { shown_on_screen: shown.length, of_total: state.trails.length, top: shown.slice(0, 6).map(trailBrief) };
+    },
+
+    change_area: function (a) {
+      var p;
+      if (a.use_my_location) {
+        p = locateOnce().then(function (pos) {
+          return ts.reverse(pos.lat, pos.lon).catch(function () { return null; }).then(function (label) {
+            return loadArea(pos.lat, pos.lon, label || 'your location (' + pos.lat.toFixed(3) + ', ' + pos.lon.toFixed(3) + ')', false);
+          });
+        });
+      } else if (a.place) {
+        if (els.searchInput) els.searchInput.value = a.place;
+        p = waitForIdle().then(function () { return doSearch(a.place); });
+      } else return { error: 'Give a place or use_my_location.' };
+      return p.then(waitForIdle).then(function () { return areaSummary(); })
+        .catch(function (e) { return { error: 'Couldn’t move there: ' + errText(e) }; });
+    },
+
+    set_activity: function (a) {
+      var mode = a.mode === 'bike' ? 'bike' : 'hike';
+      return Promise.resolve(setMode(mode)).then(waitForIdle).then(function () { return areaSummary(); });
+    },
+
+    open_trail: function (a) {
+      var t = findTrail(a.trail_id);
+      if (!t) return { error: 'No loaded trail matches "' + a.trail_id + '".' };
+      openDetails(t);
+      return { opened: t.name };
+    },
+
+    get_my_activity: function () {
+      var logs = [], litter = [], points = null, bags = null;
+      try { logs = JSON.parse(localStorage.getItem('calledit_tracks_v1') || '[]') || []; } catch (e) { }
+      try { litter = JSON.parse(localStorage.getItem('calledit_litter_v1') || '[]') || []; } catch (e) { }
+      try { points = JSON.parse(localStorage.getItem('calledit_points_v1') || 'null'); } catch (e) { }
+      try { bags = JSON.parse(localStorage.getItem('calledit_bags_v1') || 'null'); } catch (e) { }
+      var weekAgo = Date.now() - 7 * 864e5;
+      var totalKm = 0, weekKm = 0, totalMs = 0;
+      logs.forEach(function (l) { totalKm += l.km || 0; totalMs += l.ms || 0; if (l.at > weekAgo) weekKm += l.km || 0; });
+      return {
+        tracked_sessions: logs.length,
+        total: { km: round1(totalKm), mi: round1(totalKm / 1.609344), moving_time_min: Math.round(totalMs / 60000) },
+        last_7_days: { km: round1(weekKm), mi: round1(weekKm / 1.609344) },
+        recent: logs.slice(0, 8).map(function (l) {
+          return { date: new Date(l.at).toLocaleDateString('en-US'), activity: l.mode === 'bike' ? 'ride' : 'hike', km: round1(l.km), mi: round1((l.km || 0) / 1.609344), minutes: Math.round((l.ms || 0) / 60000) };
+        }),
+        litter: { logs: Array.isArray(litter) ? litter.length : 0, points: typeof points === 'number' ? points : (points && points.total) || null, bags: typeof bags === 'number' ? bags : null },
+        currently_tracking: tracker.active ? { distance: kmMi(tracker.distance), minutes: Math.round(tracker.elapsedMs / 60000) } : null
+      };
+    }
+  };
+
+  function runTool(call, typing) {
+    var name = call.function.name, args = {};
+    try { args = call.function.arguments ? (typeof call.function.arguments === 'string' ? JSON.parse(call.function.arguments) : call.function.arguments) : {}; }
+    catch (e) { return Promise.resolve({ error: 'Arguments were not valid JSON' }); }
+    if (!TOOLS[name]) return Promise.resolve({ error: 'Unknown tool ' + name });
+    if (typing) typing.setLabel(TOOL_LABELS[name] || 'Working…');
+    return Promise.resolve().then(function () { return TOOLS[name](args || {}); })
+      .catch(function (e) { return { error: errText(e) }; });
+  }
+
+  function buildSystemPrompt() {
+    var now = new Date();
+    var top = filteredTrails().slice(0, 15).map(function (t) {
+      var b = trailBrief(t);
+      return '- ' + b.id + ' · ' + b.name + ' · ' + (b.length ? b.length.km + ' km (' + b.length.mi + ' mi)' : 'length unlisted') +
+        (b.google_rating ? ' · Google ' + b.google_rating + '★ (' + b.google_reviews + ')' : '') + ' · ' + b.from_area_center_km + ' km from centre';
+    }).join('\n');
+    var wx = weatherDays(state.weather, 3).map(function (d) {
+      return d.weekday + ': ' + d.conditions + ', ' + d.high_f + '/' + d.low_f + '°F (' + d.high_c + '/' + d.low_c + '°C)' + (d.rain_chance_pct != null ? ', rain ' + d.rain_chance_pct + '%' : '');
+    }).join('; ');
+    var f = state.filter, filt = [];
+    if (f.maxKm) filt.push('max ' + f.maxKm + ' km');
+    if (f.minRating) filt.push('rating ≥ ' + f.minRating);
+    if (f.easyOnly) filt.push('easy only');
+    filt.push('sorted by ' + ({ near: 'distance', short: 'shortest', long: 'longest', rated: 'rating' }[f.sort] || 'distance'));
+    return [
+      'You are the CalledIt trail assistant: a friendly, expert hiking and biking guide inside the CalledIt app (Trails page), powered by Grok.',
+      'Today is ' + now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + '. ' +
+        (USE_MILES ? 'The user is in the US: give miles first (km in brackets) and °F first.' : 'Use km and °C (add miles/°F only if asked).'),
+      'Area on screen: ' + state.location.label + ' (' + state.location.lat.toFixed(4) + ', ' + state.location.lon.toFixed(4) + ')' +
+        (state.location.guessed ? ' — this is only the SAMPLE area; the user has not shared a location or searched yet.' : '.') +
+        ' Activity: ' + (state.mode === 'bike' ? 'biking routes' : 'hiking trails') + '. ' + state.trails.length + ' routes loaded (data: ' + state.dataSource + '). List filter: ' + filt.join(', ') + '.' +
+        (tracker.active ? ' The user is tracking a ' + (state.mode === 'bike' ? 'ride' : 'hike') + ' right now (' + fmtTrackDist(tracker.distance) + ' so far).' : ''),
+      top ? 'Loaded routes (id · name · length · rating · distance):\n' + top : 'No routes are loaded for this area.',
+      wx ? 'Forecast here: ' + wx + '.' : '',
+      'How to work:',
+      '- For facts about trails, weather, loops, parking/water or the user’s own hikes, use the tools. Never invent trail names, lengths, ratings, distances or forecasts; if data is missing, say so.',
+      '- Answer general outdoor questions (gear, safety, training, etiquette, wildlife, first aid basics, what to pack) from your own knowledge.',
+      '- When the user wants to see, filter, switch, open or plan something, do it with update_trail_list, change_area, set_activity, open_trail or plan_loop_route — the app updates on screen; then tell them what changed.',
+      '- If no trails fit (or none are loaded), suggest plan_loop_route, which builds loops on any mapped paths.',
+      '- Keep replies short for a phone: 1-3 short paragraphs or up to 6 bullets, **bold** trail names, no tables, no HTML, no raw ids.',
+      '- Safety first: mention heat, water and daylight when relevant. For emergencies tell them to call local emergency services (911 in the US).'
+    ].filter(Boolean).join('\n');
+  }
+
+  function ensureSignedIn(typing) {
+    if (puterSignedIn()) return Promise.resolve();
+    if (typing) typing.setLabel('Opening the free Puter sign-in…');
+    return window.puter.auth.signIn({ attempt_temp_user_creation: true }).then(function () { renderAiStatus(); });
+  }
+
+  function runAgent(question, typing) {
+    var messages = [{ role: 'system', content: buildSystemPrompt() }]
+      .concat(ai.history.slice(-12))
+      .concat([{ role: 'user', content: question }]);
+    var rounds = 0;
+    function step() {
+      if (typing) typing.setLabel(rounds ? 'Grok is writing…' : 'Grok is thinking…');
+      return grokChat(messages, rounds < MAX_TOOL_ROUNDS).then(function (res) {
+        var msg = res.message || {};
+        var calls = (msg.tool_calls || []).filter(function (c) { return c && c.function && c.function.name; });
+        if (calls.length && rounds < MAX_TOOL_ROUNDS) {
+          rounds++;
+          var am = {};
+          Object.keys(msg).forEach(function (k) { am[k] = msg[k]; });
+          am.role = 'assistant';
+          if (am.content == null) am.content = '';
+          messages.push(am);
+          /* run tools one after another — some change what the next one sees */
+          return calls.reduce(function (p, call) {
+            return p.then(function () {
+              return runTool(call, typing).then(function (result) {
+                var json;
+                try { json = JSON.stringify(result); } catch (e) { json = '{"error":"unserializable result"}'; }
+                if (json.length > 12000) json = JSON.stringify({ note: 'result truncated', preview: json.slice(0, 11000) });
+                messages.push({ role: 'tool', tool_call_id: call.id, content: json });
+              });
+            });
+          }, Promise.resolve()).then(step);
+        }
+        var text = textOf(msg.content).trim();
+        if (!text) throw new Error('Grok sent an empty answer');
+        return text;
+      });
+    }
+    return step().then(function (text) {
+      ai.history.push({ role: 'user', content: question }, { role: 'assistant', content: text });
+      if (ai.history.length > 24) ai.history = ai.history.slice(-24);
+      return text;
+    });
+  }
+
+  function answer(raw) {
+    var q = String(raw || '').trim();
+    if (!q) return;
+    if (ai.busy) { C.toast('One moment — still answering your last question…'); return; }
+    ai.busy = true;
+    setComposerBusy(true);
+    var typing = typingIndicator('Connecting to Grok…');
+    loadPuter()
+      .then(function () { return ensureSignedIn(typing); })
+      .then(function () { return runAgent(q, typing); })
+      .then(function (text) {
+        typing.remove();
+        botSay(formatReply(text));
+      }, function (err) {
+        typing.remove();
+        handleAiFailure(q, err);
+      })
+      .then(function () { ai.busy = false; setComposerBusy(false); renderAiStatus(); });
+  }
+
+  function retryWith(q) {
+    return function () { userSay(q); answer(q); };
+  }
+
+  function handleAiFailure(q, err) {
+    var local = '';
+    try { local = localAnswer(q); } catch (e) { local = ''; }
+    var tail = local ? '<div class="msg-local"><span class="muted">Meanwhile, from the trail data on this page:</span><br>' + local + '</div>' : '';
+    if (isAuthError(err)) {
+      botSay('To answer that, Grok needs a <b>free Puter account</b> — a one-time sign-in (a guest account is created for you; no card, no API key). ' +
+        'The sign-in window was closed or blocked.' + tail, [{
+          label: '🔓 Sign in & ask again', fn: function () {
+            /* runs inside the tap, so the sign-in window is allowed to open */
+            loadPuter().then(function (p) {
+              return p.auth.signIn({ attempt_temp_user_creation: true });
+            }).then(function () { renderAiStatus(); retryWith(q)(); }, function () {
+              C.toast('Sign-in didn’t finish — tap again when you’re ready.');
+            });
+          }
+        }]);
+    } else if (isQuotaError(err)) {
+      botSay('Your <b>free Puter AI allowance</b> for this month is used up, so Grok can’t answer right now. It resets monthly — or top it up in your Puter account.' + tail, [
+        { label: 'Open Puter usage', fn: function () { window.open('https://puter.com/dashboard#usage', '_blank', 'noopener'); } }
+      ]);
+    } else {
+      botSay('Grok couldn’t be reached just now (' + esc(errText(err)) + ').' + tail, [{ label: '↻ Try again', fn: retryWith(q) }]);
+    }
+  }
+
+  /* Local data-driven answers — ONLY used when the AI is unreachable. */
   function localAnswer(q) {
     var low = q.toLowerCase();
-    /* a question about a specific loaded trail by (partial) name */
     var named = state.trails.filter(function (t) {
       var n = t.name.toLowerCase();
       return n.length > 3 && low.indexOf(n) !== -1;
@@ -1189,163 +2138,40 @@
       });
     }
     if (named.length) {
-      return 'Here’s what I know about <b>' + esc(named[0].name) + '</b> from the data on this page:<br>' +
-        trailLine(named[0], true) +
-        (named[0].distanceM != null ? '<br>Typical time: ' + C.fmtDuration(estimateMinutes(named[0])) : '') +
-        '<br>Tap <b>Details</b> on its card for the elevation profile and directions.';
+      return trailLine(named[0], true) +
+        (named[0].distanceM != null ? '<br>Typical time: ' + C.fmtDuration(estimateMinutes(named[0])) : '');
     }
-    if (/(\bkm\b|mile|mi\b|distance|long|short|far)/.test(low)) {
-      var withLen = state.trails.filter(function (t) { return t.distanceM != null; })
-        .sort(function (a, b) { return a.distanceM - b.distanceM; });
-      if (withLen.length) {
-        return 'Distances around <b>' + esc(state.location.label) + '</b> (shortest → longest):<br>' +
-          withLen.slice(0, 5).map(function (t) { return trailLine(t); }).join('<br>');
-      }
-    }
-    if (/rain|weather|snow|storm|sun|cold|warm|temperature|forecast/.test(low)) {
-      var w = state.weather;
-      if (w && w.points && w.points[0] && w.points[0].days && w.points[0].days.length) {
-        var rows = w.points[0].days.slice(0, 4).map(function (day) {
-          var info = wmoInfo(day.weather_code);
-          var d = new Date(day.date + 'T12:00:00');
-          return '• <b>' + d.toLocaleDateString(undefined, { weekday: 'long' }) + '</b>: ' + info.icon + ' ' + info.label +
-            ', ' + (day.temp_max_c != null ? Math.round(day.temp_max_c) : '?') + '° / ' + (day.temp_min_c != null ? Math.round(day.temp_min_c) : '?') + '°';
+    if (/rain|weather|snow|storm|sun|cold|warm|hot|temperature|forecast/.test(low)) {
+      var days = weatherDays(state.weather, 4);
+      if (days.length) {
+        return days.map(function (d) {
+          return '• <b>' + esc(d.weekday) + '</b>: ' + esc(d.conditions) + ', ' + d.high_c + '° / ' + d.low_c + '°C' + (d.rain_chance_pct != null ? ', rain ' + d.rain_chance_pct + '%' : '');
         }).join('<br>');
-        return 'Forecast for <b>' + esc(state.location.label) + '</b>:<br>' + rows;
       }
-      return 'The forecast isn’t loading right now — the weather strip above the trail list updates automatically when it’s available.';
+      return '';
     }
-    /* last resort: summarize what is actually loaded and how to ask more */
-    var sample = state.trails.slice(0, 3).map(function (t) { return trailLine(t, true); }).join('<br>');
-    return 'I’m answering from the <b>' + state.trails.length + '</b> routes loaded around <b>' + esc(state.location.label) + '</b>' +
-      (sample ? ':<br>' + sample : '.') +
-      '<br><br>Right now I’m in limited local mode — to make me answer <b>any</b> question (like “which trail has the best views for a beginner?” or “what should I pack?”), ' +
-      'add a <b>Grok (xAI) key</b> under <b>Settings → API keys</b> (link in the footer).';
+    var list = state.trails.slice();
+    if (/(easy|easiest|beginner|kid|family|short)/.test(low)) list.sort(function (a, b) { return (a.distanceM || 9e9) - (b.distanceM || 9e9); });
+    else if (/(long|longest|hard|challenge|epic)/.test(low)) list.sort(function (a, b) { return (b.distanceM || 0) - (a.distanceM || 0); });
+    else if (/(top|best|rated|popular)/.test(low)) list.sort(function (a, b) { return ((b.google && b.google.rating) || 0) - ((a.google && a.google.rating) || 0); });
+    return list.slice(0, 3).map(function (t) { return trailLine(t, true); }).join('<br>');
   }
 
-  function answerAI(q) {
-    var typing = typingIndicator();
-    askGrok(q)
-      .then(function (reply) {
-        typing.remove();
-        botSay(formatReply(reply));
-      })
-      .catch(function (err) {
-        typing.remove();
-        if (err && err.noKey) {
-          botSay(localAnswer(q));
-        } else {
-          botSay(localAnswer(q) + '<br><span class="muted">(AI service unreachable right now — answered from local trail data.)</span>');
-        }
-      });
+  /* ---------------- open / close / new chat ---------------- */
+  function greet() {
+    botSay(formatReply(
+      'Hi! I’m your trail assistant, powered by **Grok** (xAI). Ask me anything — which of the **' + state.trails.length + '** routes around **' +
+      state.location.label + '** suits you, the weather, a loop of a certain length, where to park or find water, gear and safety tips…\n' +
+      'I can also filter the list, switch areas or activity, open a trail and draw a planned loop on the map for you.'
+    ) + (puterSignedIn() ? '' :
+      '<div class="msg-note">🔓 Your first question opens a <b>one-time free Puter sign-in</b> (Puter pays for the AI through your free monthly allowance — no API key, no card).</div>'));
   }
 
-  function answer(raw) {
-    var q = raw.toLowerCase().trim();
-    var hasTrails = state.trails.length > 0;
-
-    if (/^(hi|hello|hey|good (morning|afternoon|evening))/.test(q)) {
-      return botSay('Hey! 👋 I can help you pick from the <b>' + state.trails.length + '</b> trails loaded around <b>' + esc(state.location.label) + '</b>. Try “easiest trails”, “top rated”, or “weather this week”.');
-    }
-
-    if (/weather|rain|sunny|forecast|storm|temperature/.test(q)) {
-      var w = state.weather;
-      if (!w || !w.points || !w.points[0] || !w.points[0].days.length) {
-        return botSay('I couldn’t load the forecast right now. The weather strip above the list updates automatically when it’s available.');
-      }
-      var days = w.points[0].days.slice(0, 4).map(function (day) {
-        var info = wmoInfo(day.weather_code);
-        var d = new Date(day.date + 'T12:00:00');
-        return '• <b>' + d.toLocaleDateString(undefined, { weekday: 'long' }) + '</b>: ' + info.icon + ' ' + info.label +
-          ', ' + (day.temp_max_c != null ? Math.round(day.temp_max_c) : '?') + '° / ' + (day.temp_min_c != null ? Math.round(day.temp_min_c) : '?') + '°' +
-          (day.precip_mm != null && day.precip_mm > 0 ? ', ' + day.precip_mm.toFixed(1) + ' mm rain' : '');
-      }).join('<br>');
-      return botSay('Here’s the outlook for <b>' + esc(state.location.label) + '</b>:<br>' + days + '<br><span class="muted">Source: Open-Meteo via TrailSplits.</span>');
-    }
-
-    if (/bike|biking|cycling|mtb|ride/.test(q) && !/hik/.test(q)) {
-      if (state.mode !== 'bike') {
-        return botSay('You’re currently browsing <b>hiking</b> trails. Want me to switch to signed <b>biking routes</b>?', [
-          { label: '🚴 Switch to biking', fn: function () { setMode('bike'); botSay('Done — showing biking routes now.'); } }
-        ]);
-      }
-      if (hasTrails) {
-        var tops = state.trails.slice(0, 3).map(function (t) { return trailLine(t, true); }).join('<br>');
-        return botSay('You’re all set — these biking routes are near ' + esc(state.location.label) + ':<br>' + tops);
-      }
-      return botSay('No signed biking routes were found here. Try searching a nearby town.');
-    }
-
-    if (/(easy|easiest|beginner|kid|family|gentle|short walk)/.test(q)) {
-      state.filter = { maxKm: null, sort: 'short', easyOnly: true, minRating: null };
-      renderAll();
-      var easy = filteredTrails().slice(0, 3);
-      if (!easy.length) return botSay('Nothing short and gentle was found in this area. Maybe widen the search to a nearby town?');
-      return botSay('I sorted the list, easiest first (shorter and local routes are usually friendlier):<br>' +
-        easy.map(function (t) { return trailLine(t); }).join('<br>') +
-        '<br><span class="muted">Note: signed routes aren’t always graded — check “Details” for the elevation profile, flat lines are kinder on the knees.</span>');
-    }
-
-    if (/(top|best|highest).*(rat|popul|review)|^top rated$|^best rated$/.test(q)) {
-      state.filter = { maxKm: null, sort: 'rated', easyOnly: false, minRating: 4.3 };
-      renderAll();
-      var rated = filteredTrails().slice(0, 3);
-      if (!rated.length) {
-        state.filter.minRating = null; renderAll();
-        return botSay('Google hasn’t rated any of these routes yet — or the ratings couldn’t be loaded. The list shows everything found instead.');
-      }
-      return botSay('Highest Google-rated around here:<br>' + rated.map(function (t) { return trailLine(t); }).join('<br>'));
-    }
-
-    var under = q.match(/(?:under|less than|shorter than|max(?:imum)?)\s*(\d+(?:[.,]\d+)?)\s*(km|kilomet|mi|mile)/);
-    if (under) {
-      var val = parseFloat(under[1].replace(',', '.'));
-      var km = /mi/.test(under[2]) ? val * 1.60934 : val;
-      state.filter = { maxKm: Math.round(km * 10) / 10, sort: 'near', easyOnly: false, minRating: null };
-      renderAll();
-      var inRange = filteredTrails().slice(0, 3);
-      if (!inRange.length) return botSay('Nothing under ' + km.toFixed(1) + ' km here. Try relaxing the limit or searching a different area.');
-      return botSay('Trails under ' + km.toFixed(1) + ' km (list updated):<br>' + inRange.map(function (t) { return trailLine(t); }).join('<br>'), [
-        { label: 'Clear filter', fn: function () { state.filter.maxKm = null; renderAll(); botSay('Filter cleared — showing everything again.'); } }
-      ]);
-    }
-
-    if (/(long|longest|epic|big day|hard|hardest|challenge)/.test(q)) {
-      state.filter = { maxKm: null, sort: 'long', easyOnly: false, minRating: null };
-      renderAll();
-      var longs = filteredTrails().filter(function (t) { return t.distanceM != null; }).slice(0, 3);
-      if (!longs.length) return botSay('No routes with a known length here.');
-      return botSay('Bring snacks — these are the longest routes around:<br>' + longs.map(function (t) { return trailLine(t); }).join('<br>'));
-    }
-
-    if (/(near|nearby|closest|next|around)/.test(q) && hasTrails) {
-      state.filter = { maxKm: null, sort: 'near', easyOnly: false, minRating: null };
-      renderAll();
-      var near = filteredTrails().slice(0, 3);
-      return botSay('Closest to ' + esc(state.location.label) + ':<br>' + near.map(function (t) { return trailLine(t, true); }).join('<br>'));
-    }
-
-    if (/how many|count/.test(q)) {
-      return botSay('I have <b>' + state.trails.length + '</b> signed routes loaded for this area (' + esc(state.dataSource) + '),' +
-        (state.googleOk ? ' plus Google ratings and photos where available.' : ' but Google ratings aren’t loading right now.'));
-    }
-
-    if (/where|what place|which town|location/.test(q)) {
-      return botSay('We’re looking at <b>' + esc(state.location.label) + '</b> (' + state.location.lat.toFixed(4) + ', ' + state.location.lon.toFixed(4) + ')' +
-        (state.location.guessed ? ' — that’s the sample area. Tap “Near me” in the search bar to use your real position.' : '.') +
-        ' Data come from ' + esc(state.dataSource) + '.');
-    }
-
-    if (/thank/.test(q)) return botSay('Anytime! Have a great trip. 🥾');
-
-    if (/what can you|help|commands|options/.test(q)) {
-      return botSay('I answer <b>any</b> question about these trails, hiking and biking. Quick commands I handle instantly:<br>' +
-        '• “easiest / beginner trails”<br>• “top rated” (Google ratings)<br>• “under 8 km”<br>• “longest routes”<br>• “nearest trails”<br>• “weather this week”<br>• “switch to biking”<br>' +
-        'Plus free-form questions like “which of these is best with kids?” or “what should I pack for the long one?”.');
-    }
-
-    /* anything else → real AI (Grok), grounded in the trails on this page */
-    return answerAI(raw);
+  function renderSuggestions() {
+    suggest.innerHTML = SUGGESTIONS.map(function (s) { return '<button type="button" class="suggest-chip">' + esc(s) + '</button>'; }).join('');
+    qsa('.suggest-chip', suggest).forEach(function (chip) {
+      chip.addEventListener('click', function () { userSay(chip.textContent); answer(chip.textContent); });
+    });
   }
 
   function hideAssistantVisual() {
@@ -1357,14 +2183,9 @@
     sheet.classList.add('is-open');
     fab.classList.add('is-hidden');
     C.pushOverlay('assistant', hideAssistantVisual);
-    if (!log.children.length) {
-      botSay('Hi! I’m the trail assistant — ask me <b>anything</b> about the <b>' + state.trails.length + '</b> routes loaded around <b>' + esc(state.location.label) + '</b>, ' +
-        'or general hiking/biking questions. Try “easiest trails”, “top rated”, or ask your own question below.');
-      suggest.innerHTML = SUGGESTIONS.map(function (s) { return '<button type="button" class="suggest-chip">' + esc(s) + '</button>'; }).join('');
-      qsa('.suggest-chip', suggest).forEach(function (chip) {
-        chip.addEventListener('click', function () { userSay(chip.textContent); answer(chip.textContent); });
-      });
-    }
+    loadPuter().catch(function () { /* surfaced on the first question */ });   /* warm up while you type */
+    renderAiStatus();
+    if (!log.children.length) { greet(); renderSuggestions(); }
   }
   function closeAssistant() {
     C.closeOverlay('assistant');
@@ -1373,6 +2194,14 @@
 
   fab.addEventListener('click', openAssistant);
   qs('#assistantClose').addEventListener('click', closeAssistant);
+  if (newChatBtn) newChatBtn.addEventListener('click', function () {
+    if (ai.busy) { C.toast('One moment — still answering…'); return; }
+    ai.history = [];
+    log.innerHTML = '';
+    if (loopPath) showLoopOnMap(null);
+    greet();
+    C.toast('New chat started');
+  });
 
   /* keep the input visible above the on-screen keyboard (esp. WebView APKs) */
   input.addEventListener('focus', function () {
@@ -1385,8 +2214,7 @@
     if (!text) return;
     userSay(text);
     input.value = '';
-    setTimeout(function () { answer(text); }, 200);
-    /* keep the conversation going — don't let the keyboard collapse */
+    answer(text);     /* immediately — keeps the tap’s permission to open the sign-in window */
     setTimeout(function () { input.focus({ preventScroll: true }); }, 320);
   });
 
@@ -1394,11 +2222,12 @@
      Mode + boot
      ============================================================ */
   function setMode(mode) {
-    if (state.mode === mode) return;
+    if (state.mode === mode) return Promise.resolve();
     state.mode = mode;
     try { localStorage.setItem('calledit_mode', mode); } catch (e) { }
     updateModeButtons();
-    loadArea(state.location.lat, state.location.lon, state.location.label, state.location.guessed);
+    if (trackEls.btnLabel && !tracker.active) trackEls.btnLabel.textContent = mode === 'bike' ? 'Track ride' : 'Track hike';
+    return loadArea(state.location.lat, state.location.lon, state.location.label, state.location.guessed);
   }
 
   function updateModeButtons() {
@@ -1414,13 +2243,14 @@
     try { savedMode = localStorage.getItem('calledit_mode'); } catch (e) { }
     state.mode = modeParam === 'bike' || (!modeParam && savedMode === 'bike') ? 'bike' : 'hike';
     updateModeButtons();
+    if (trackEls.btnLabel) trackEls.btnLabel.textContent = state.mode === 'bike' ? 'Track ride' : 'Track hike';
 
     /* optional deep link: ?q=place or ?lat&lon */
     var qParam = params.get('q');
     var latParam = parseFloat(params.get('lat')), lonParam = parseFloat(params.get('lon'));
 
-    els.searchBtn.addEventListener('click', function () { doSearch(els.searchInput.value); });
-    els.searchInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doSearch(els.searchInput.value); } });
+    els.searchBtn.addEventListener('click', function () { doSearch(els.searchInput.value).catch(function () { }); });
+    els.searchInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doSearch(els.searchInput.value).catch(function () { }); } });
     els.locateBtn.addEventListener('click', locateMe);
     els.modeHike.addEventListener('click', function () { setMode('hike'); });
     els.modeBike.addEventListener('click', function () { setMode('bike'); });
@@ -1431,7 +2261,9 @@
 
     if (qParam) {
       els.searchInput.value = qParam;
-      doSearch(qParam);
+      doSearch(qParam).catch(function () {
+        loadArea(cfg.defaultLocation.lat, cfg.defaultLocation.lon, cfg.defaultLocation.label, true);
+      });
     } else if (!isNaN(latParam) && !isNaN(lonParam)) {
       loadArea(latParam, lonParam, 'pinned location (' + latParam.toFixed(3) + ', ' + lonParam.toFixed(3) + ')', false);
     } else {

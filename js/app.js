@@ -277,7 +277,7 @@
       '  <p class="site-footer__credits">Trail &amp; route data: <a href="https://trailsplits.com" target="_blank" rel="noopener">TrailSplits</a> · ' +
       'Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors · ' +
       'Photos &amp; ratings: Google · Weather: Open-Meteo (CC BY 4.0)</p>' +
-      '  <p class="site-footer__credits"><button type="button" class="footer-link-btn" id="footerKeys">⚙️ API keys &amp; settings</button></p>' +
+      '  <p class="site-footer__credits"><button type="button" class="footer-link-btn" id="footerKeys">⚙️ Settings — map key, AI model</button></p>' +
       '</div>';
     BODY.appendChild(f);
     qs('#footerKeys', f).addEventListener('click', openSettings);
@@ -339,15 +339,48 @@
      After permission is granted, phones can still have Location Services
      turned off — geolocation then fails with code 2. Prompt the user to
      actually turn location on (the Android app opens the system settings). */
+  var pendingLocationRetry = null;
+
+  function hasBridge(fn) {
+    return !!(window.CalledItAndroid && typeof window.CalledItAndroid[fn] === 'function');
+  }
+
   function openLocationSettings() {
-    if (window.CalledItAndroid && typeof window.CalledItAndroid.openLocationSettings === 'function') {
-      window.CalledItAndroid.openLocationSettings();   /* APK: native settings screen */
+    if (hasBridge('openLocationSettings')) {
+      window.CalledItAndroid.openLocationSettings();   /* APK: straight to the system screen */
       return;
     }
     toast('Turn on Location / GPS in your device’s quick settings, then tap “Near me” again.', 5200);
   }
 
+  /* Called by the Android app (onResume) once device location is back ON:
+     re-runs whatever needed it (Near me / Track hike) without another tap. */
+  function onNativeLocationOn() {
+    var retry = pendingLocationRetry;
+    pendingLocationRetry = null;
+    var open = qs('.loc-prompt');
+    if (open) open.remove();
+    if (typeof retry === 'function') {
+      toast('Location is on — continuing…', 2200);
+      setTimeout(retry, 400);
+    }
+  }
+
   function promptEnableLocation(onRetry) {
+    pendingLocationRetry = onRetry || null;
+
+    /* APK: one native dialog (“Turn on location” → system settings). The app
+       calls CalledIt.onNativeLocationOn() when you come back with it on. */
+    if (hasBridge('promptEnableLocation')) {
+      var shown = window.CalledItAndroid.promptEnableLocation();
+      if (shown === false) {                   /* location is ON — there’s just no fix yet */
+        pendingLocationRetry = null;
+        toast('Location is on, but there’s no GPS fix yet — step outside or near a window, then try again.', 5200);
+      }
+      return;
+    }
+
+    if (qs('.loc-prompt')) return;            /* never stack two prompts */
     var wrap = document.createElement('div');
     wrap.className = 'loc-prompt';
     wrap.setAttribute('role', 'alertdialog');
@@ -365,17 +398,31 @@
     document.body.appendChild(wrap);
     function done() { wrap.remove(); }
     qs('#locPromptOpen', wrap).addEventListener('click', openLocationSettings);
-    qs('#locPromptRetry', wrap).addEventListener('click', function () { done(); if (onRetry) onRetry(); });
-    qs('#locPromptClose', wrap).addEventListener('click', done);
+    qs('#locPromptRetry', wrap).addEventListener('click', function () {
+      done();
+      var retry = pendingLocationRetry; pendingLocationRetry = null;
+      if (retry) retry();
+    });
+    qs('#locPromptClose', wrap).addEventListener('click', function () { pendingLocationRetry = null; done(); });
   }
 
-  /* ---------------- settings: API keys dialog ----------------
-     Lets the user paste Google Maps / TrailSplits / Grok keys at runtime.
-     Stored in localStorage and merged into CALLEDIT_CONFIG on every load. */
+  /* ---------------- settings dialog ----------------
+     Google Maps / TrailSplits keys + which Grok model the trail assistant
+     uses (via Puter.js — no AI key needed). Stored on this device only and
+     merged into CALLEDIT_CONFIG on every load (see config.js). */
   function openSettings() {
     var existing = qs('#settingsBackdrop');
     if (existing) existing.remove();
-    var keys = window.CALLEDIT_CONFIG || {};
+    var cfg = window.CALLEDIT_CONFIG || {};
+    var ai = cfg.ai || { models: [], model: '' };
+    var saved = {};
+    try { saved = JSON.parse(localStorage.getItem('calledit_keys_v1') || '{}') || {}; } catch (e) { saved = {}; }
+    var esc = escapeHtml;
+    var modelOptions = (ai.models || []).map(function (m) {
+      return '<option value="' + esc(m.id) + '"' + (m.id === ai.model ? ' selected' : '') + '>' + esc(m.label) + '</option>';
+    }).join('');
+    var puterSignedIn = !!(window.puter && window.puter.auth && window.puter.auth.isSignedIn && window.puter.auth.isSignedIn());
+
     var box = document.createElement('div');
     box.className = 'modal-backdrop is-open';
     box.id = 'settingsBackdrop';
@@ -384,18 +431,24 @@
       '  <button type="button" class="modal__close" id="settingsClose" aria-label="Close settings">' +
       '    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>' +
       '  </button>' +
-      '  <h2 id="settingsTitle">API keys</h2>' +
-      '  <p class="muted" style="font-size:.9rem">Keys are saved on this device only. Leave a field empty to keep using the built-in one.</p>' +
+      '  <h2 id="settingsTitle">Settings</h2>' +
+      '  <p class="muted" style="font-size:.9rem">Saved on this device only. Leave a key empty to keep using the built-in one.</p>' +
       '  <div class="settings-grid">' +
-      '    <label>Google Maps key<div class="muted" style="font-size:.75rem">Maps JavaScript + Places (photos, ratings, map)</div>' +
-      '      <input id="setGoogleKey" type="text" spellcheck="false" autocomplete="off" placeholder="AIza…" value="' + esc(keys.googleMapsApiKey || '') + '"></label>' +
-      '    <label>TrailSplits key<div class="muted" style="font-size:.75rem">Trail &amp; elevation API (optional — free tier works without one)</div>' +
-      '      <input id="setTrailsKey" type="text" spellcheck="false" autocomplete="off" placeholder="trail-…" value="' + esc(keys.trailsplitsApiKey || '') + '"></label>' +
-      '    <label>Grok (xAI) key<div class="muted" style="font-size:.75rem">Makes the trail assistant answer any question</div>' +
-      '      <input id="setGrokKey" type="text" spellcheck="false" autocomplete="off" placeholder="xai-…" value="' + esc(keys.grokApiKey || '') + '"></label>' +
+      '    <label>Trail assistant AI model<div class="muted" style="font-size:.75rem">Grok by xAI, free through Puter — no API key needed</div>' +
+      '      <select id="setAiModel">' + modelOptions + '</select></label>' +
+      '    <div class="settings-row" id="puterRow">' +
+      '      <div><b>Puter account</b><div class="muted" style="font-size:.75rem" id="puterStatus">' +
+               (puterSignedIn ? 'Connected — the assistant can answer anything.' : 'Not connected yet — your first assistant question opens a free one-time sign-in.') +
+      '      </div></div>' +
+      (puterSignedIn ? '      <button type="button" class="btn btn-ghost btn-sm" id="puterSignOut">Sign out</button>' : '') +
+      '    </div>' +
+      '    <label>Google Maps key<div class="muted" style="font-size:.75rem">Maps JavaScript API + Places API (New): map, photos, ratings</div>' +
+      '      <input id="setGoogleKey" type="text" spellcheck="false" autocomplete="off" placeholder="AIza…" value="' + esc(saved.googleMapsApiKey || '') + '"></label>' +
+      '    <label>TrailSplits key<div class="muted" style="font-size:.75rem">Trail &amp; elevation API (optional — the free tier works without one)</div>' +
+      '      <input id="setTrailsKey" type="text" spellcheck="false" autocomplete="off" placeholder="optional" value="' + esc(saved.trailsplitsApiKey || '') + '"></label>' +
       '  </div>' +
       '  <div class="btn-row" style="margin-top:18px">' +
-      '    <button type="button" class="btn btn-primary" id="settingsSave">Save keys</button>' +
+      '    <button type="button" class="btn btn-primary" id="settingsSave">Save</button>' +
       '    <button type="button" class="btn btn-ghost" id="settingsCancel">Cancel</button>' +
       '  </div>' +
       '</div>';
@@ -408,18 +461,21 @@
     qs('#settingsClose', box).addEventListener('click', close);
     qs('#settingsCancel', box).addEventListener('click', close);
     box.addEventListener('click', function (e) { if (e.target === box) close(); });
+    var signOut = qs('#puterSignOut', box);
+    if (signOut) signOut.addEventListener('click', function () {
+      try { window.puter.auth.signOut(); } catch (e) { }
+      qs('#puterStatus', box).textContent = 'Signed out. Your next assistant question will ask you to sign in again.';
+      signOut.remove();
+    });
     qs('#settingsSave', box).addEventListener('click', function () {
       var payload = {
         googleMapsApiKey: qs('#setGoogleKey', box).value.trim(),
         trailsplitsApiKey: qs('#setTrailsKey', box).value.trim(),
-        grokApiKey: qs('#setGrokKey', box).value.trim()
+        aiModel: qs('#setAiModel', box).value
       };
       try { localStorage.setItem('calledit_keys_v1', JSON.stringify(payload)); } catch (e) { }
-      ['googleMapsApiKey', 'trailsplitsApiKey', 'grokApiKey'].forEach(function (k) {
-        if (payload[k]) (window.CALLEDIT_CONFIG || {})[k] = payload[k];
-      });
       close();
-      toast('Keys saved. Reloading so they take effect…');
+      toast('Saved. Reloading so it takes effect…');
       setTimeout(function () { location.reload(); }, 700);
     });
     pushOverlay('settings', function () { box.remove(); });
@@ -467,6 +523,7 @@
     pushOverlay: pushOverlay, popOverlay: popOverlay, closeOverlay: closeOverlay,
     /* location services */
     openLocationSettings: openLocationSettings, promptEnableLocation: promptEnableLocation,
+    onNativeLocationOn: onNativeLocationOn,
     /* settings */
     openSettings: openSettings
   };

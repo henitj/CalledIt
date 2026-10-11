@@ -10,8 +10,8 @@ android {
         applicationId = "com.calledit.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
     }
 
     buildTypes {
@@ -46,7 +46,7 @@ val copyWebAssets = tasks.register<Copy>("copyWebAssets") {
     from(rootProject.projectDir.parentFile) {
         include("index.html", "start.html", "trails.html", "social.html")
         include("manifest.webmanifest")
-        include("css/**", "js/**", "assets/**")
+        include("css/**", "js/**", "assets/**", "vendor/**")
     }
     into(webAssetsRoot.map { it.dir("www") })
 }

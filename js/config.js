@@ -1,21 +1,20 @@
 /* CalledIt — runtime configuration.
    ---------------------------------------------------------------------------
-   API keys can be set here (build time) OR at runtime via the in-app
-   “API keys” dialog (Settings → API keys, link in the footer). Runtime keys
-   are stored in localStorage and override the values below.
+   Values here are the built-in defaults. The in-app Settings dialog (footer →
+   “⚙️ Settings”) can override the Google / TrailSplits keys and the AI model
+   per device; those overrides live in localStorage and are merged below.
 
-   Keys are client-side keys (Maps JS / Places / TrailSplits / Grok are called
-   from the browser). Restrict them by HTTP referrer in their consoles:
-   - Google Cloud: enable “Maps JavaScript API” + “Places API (New)”, and add
-     referrers for your web origin AND (for the Android APK)
-     http://localhost:8765/* and http://127.0.0.1:8765/*
-   - xAI console: restrict to your origins if available.
+   Google key status (checked 2026-10-11): the key below authenticates for the
+   Maps JavaScript API and Places API (New), and has no referrer restriction,
+   so it works on the website AND inside the Android app
+   (http://127.0.0.1:8765). If you ever restrict it by HTTP referrer, add your
+   web origin plus http://127.0.0.1:8765/* and http://localhost:8765/*.
 --------------------------------------------------------------------------- */
 window.CALLEDIT_CONFIG = {
   appName: 'CalledIt',
 
-  /* Google Maps Platform — used for the interactive map AND Places
-     photos/ratings. Without a valid key the map falls back to OpenStreetMap. */
+  /* Google Maps Platform — interactive map (Maps JavaScript API) + Places
+     photos/ratings (Places API New). */
   googleMapsApiKey: 'AIzaSyD_J-3klu8NxOItUHwmK4bCkfuY3pROmAE',
 
   /* TrailSplits — trails, relations, elevation, place/weather search.
@@ -24,14 +23,33 @@ window.CALLEDIT_CONFIG = {
   trailsplitsSite: 'https://trailsplits.com',
   trailsplitsApiKey: '',
 
-  /* Grok (xAI) — powers the trail assistant’s free-form answers.
-     Put any Grok key here (or in the in-app Settings). */
-  grokApiKey: '',
-  grokApi: 'https://api.x.ai/v1/chat/completions',
-  grokModel: 'grok-4-fast',            /* tried first … */
-  grokModelFallbacks: ['grok-3-mini', 'grok-3', 'grok-2-latest'], /* … then these */
+  /* Trail assistant AI — Grok through Puter.js (https://docs.puter.com).
+     No API key: Puter's “user-pays” model gives every user a free monthly AI
+     allowance on their own (free) Puter account. The first question opens a
+     one-time Puter sign-in window (a guest account is created automatically). */
+  ai: {
+    puterJs: 'https://js.puter.com/v2/',
+    /* Default = instant answers. Grok 4.7 is smarter but averages ~16 s before
+       the first word and costs ~10× more of each user's free allowance. */
+    model: 'x-ai/grok-4-1-fast-non-reasoning',
+    /* tried in order (after the chosen model) if a model errors/is unavailable */
+    fallbackModels: ['x-ai/grok-4-1-fast-non-reasoning', 'x-ai/grok-4.7', 'x-ai/grok-4.5', 'x-ai/grok-2'],
+    /* shown in Settings → AI model */
+    models: [
+      { id: 'x-ai/grok-4-1-fast-non-reasoning', label: 'Grok 4.1 Fast — instant answers (recommended)' },
+      { id: 'x-ai/grok-4-1-fast-reasoning', label: 'Grok 4.1 Fast Reasoning — thinks a little first' },
+      { id: 'x-ai/grok-4.7', label: 'Grok 4.7 — newest flagship, smartest, slow (~15 s+)' },
+      { id: 'x-ai/grok-4.6', label: 'Grok 4.6' },
+      { id: 'x-ai/grok-4.5', label: 'Grok 4.5' }
+    ]
+  },
 
-  /* OpenStreetMap-powered fallbacks (used automatically if Google/TrailSplits fail) */
+  /* Fallback map (only used if Google Maps can’t load) — bundled Leaflet with
+     clean CARTO / topo / satellite tiles instead of the plain OSM iframe. */
+  leafletJs: 'vendor/leaflet/leaflet.js',
+  leafletCss: 'vendor/leaflet/leaflet.css',
+
+  /* OpenStreetMap-powered data fallbacks (used automatically if TrailSplits fails) */
   overpassApi: 'https://overpass-api.de/api/interpreter',
   nominatim: 'https://nominatim.openstreetmap.org',
 
@@ -46,13 +64,14 @@ window.CALLEDIT_CONFIG = {
   ]
 };
 
-/* Merge keys saved at runtime (Settings → API keys) over the defaults above. */
+/* Merge per-device overrides saved in Settings over the defaults above. */
 (function () {
   try {
     var saved = JSON.parse(localStorage.getItem('calledit_keys_v1') || '{}');
     var cfg = window.CALLEDIT_CONFIG;
-    ['googleMapsApiKey', 'trailsplitsApiKey', 'grokApiKey', 'grokModel'].forEach(function (k) {
+    ['googleMapsApiKey', 'trailsplitsApiKey'].forEach(function (k) {
       if (typeof saved[k] === 'string' && saved[k].trim()) cfg[k] = saved[k].trim();
     });
+    if (typeof saved.aiModel === 'string' && /^[\w.\-\/]+$/.test(saved.aiModel)) cfg.ai.model = saved.aiModel;
   } catch (e) { /* private mode / corrupt value — keep defaults */ }
 })();

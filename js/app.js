@@ -277,8 +277,152 @@
       '  <p class="site-footer__credits">Trail &amp; route data: <a href="https://trailsplits.com" target="_blank" rel="noopener">TrailSplits</a> · ' +
       'Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors · ' +
       'Photos &amp; ratings: Google · Weather: Open-Meteo (CC BY 4.0)</p>' +
+      '  <p class="site-footer__credits"><button type="button" class="footer-link-btn" id="footerKeys">⚙️ API keys &amp; settings</button></p>' +
       '</div>';
     BODY.appendChild(f);
+    qs('#footerKeys', f).addEventListener('click', openSettings);
+  }
+
+  /* ---------------- overlay stack + Android back gesture ----------------
+     Overlays (trail details, assistant, settings …) push a history entry so
+     the Android back gesture/back button CLOSES the overlay and returns to
+     the last page instead of exiting the app. */
+  var overlayStack = [];
+
+  function pushOverlay(name, closeFn) {
+    var entry = { name: name, closeFn: closeFn, hist: false };
+    overlayStack.push(entry);
+    try {
+      history.pushState({ calleditOverlay: name, depth: overlayStack.length }, '');
+      entry.hist = true;
+    } catch (e) { /* file:// in some WebViews — overlay still works, no history */ }
+  }
+
+  function popOverlay() {
+    var top = overlayStack.pop();
+    if (top && typeof top.closeFn === 'function') top.closeFn();
+    return !!top;
+  }
+
+  function closeOverlayByName(name) {
+    for (var i = overlayStack.length - 1; i >= 0; i--) {
+      if (overlayStack[i].name === name) {
+        overlayStack[i].closeFn();
+        overlayStack.splice(i, 1);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  window.addEventListener('popstate', function () {
+    /* Back gesture: close whatever overlay is open instead of leaving the app */
+    popOverlay();
+  });
+
+  /* Close the top overlay programmatically (used by UI close buttons). */
+  function closeOverlay(name) {
+    if (overlayStack.length && (name == null || overlayStack[overlayStack.length - 1].name === name)) {
+      var top = overlayStack[overlayStack.length - 1];
+      if (top.hist) {
+        /* consume the history entry; popstate will pop + run closeFn */
+        history.back();
+      } else {
+        popOverlay();
+      }
+      return true;
+    }
+    return closeOverlayByName(name);
+  }
+
+  /* ---------------- location services prompt ----------------
+     After permission is granted, phones can still have Location Services
+     turned off — geolocation then fails with code 2. Prompt the user to
+     actually turn location on (the Android app opens the system settings). */
+  function openLocationSettings() {
+    if (window.CalledItAndroid && typeof window.CalledItAndroid.openLocationSettings === 'function') {
+      window.CalledItAndroid.openLocationSettings();   /* APK: native settings screen */
+      return;
+    }
+    toast('Turn on Location / GPS in your device’s quick settings, then tap “Near me” again.', 5200);
+  }
+
+  function promptEnableLocation(onRetry) {
+    var wrap = document.createElement('div');
+    wrap.className = 'loc-prompt';
+    wrap.setAttribute('role', 'alertdialog');
+    wrap.setAttribute('aria-label', 'Location is turned off');
+    wrap.innerHTML =
+      '<div class="loc-prompt__card">' +
+      '  <h2>📍 Location is turned off</h2>' +
+      '  <p>You allowed CalledIt to use your location, but your device’s location (GPS) switch is off, so we can’t find you yet.</p>' +
+      '  <div class="btn-row" style="margin-top:14px">' +
+      '    <button type="button" class="btn btn-primary" id="locPromptOpen">Turn on location</button>' +
+      '    <button type="button" class="btn btn-ghost" id="locPromptRetry">I turned it on — retry</button>' +
+      '    <button type="button" class="btn btn-ghost" id="locPromptClose">Not now</button>' +
+      '  </div>' +
+      '</div>';
+    document.body.appendChild(wrap);
+    function done() { wrap.remove(); }
+    qs('#locPromptOpen', wrap).addEventListener('click', openLocationSettings);
+    qs('#locPromptRetry', wrap).addEventListener('click', function () { done(); if (onRetry) onRetry(); });
+    qs('#locPromptClose', wrap).addEventListener('click', done);
+  }
+
+  /* ---------------- settings: API keys dialog ----------------
+     Lets the user paste Google Maps / TrailSplits / Grok keys at runtime.
+     Stored in localStorage and merged into CALLEDIT_CONFIG on every load. */
+  function openSettings() {
+    var existing = qs('#settingsBackdrop');
+    if (existing) existing.remove();
+    var keys = window.CALLEDIT_CONFIG || {};
+    var box = document.createElement('div');
+    box.className = 'modal-backdrop is-open';
+    box.id = 'settingsBackdrop';
+    box.innerHTML =
+      '<div class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">' +
+      '  <button type="button" class="modal__close" id="settingsClose" aria-label="Close settings">' +
+      '    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>' +
+      '  </button>' +
+      '  <h2 id="settingsTitle">API keys</h2>' +
+      '  <p class="muted" style="font-size:.9rem">Keys are saved on this device only. Leave a field empty to keep using the built-in one.</p>' +
+      '  <div class="settings-grid">' +
+      '    <label>Google Maps key<div class="muted" style="font-size:.75rem">Maps JavaScript + Places (photos, ratings, map)</div>' +
+      '      <input id="setGoogleKey" type="text" spellcheck="false" autocomplete="off" placeholder="AIza…" value="' + esc(keys.googleMapsApiKey || '') + '"></label>' +
+      '    <label>TrailSplits key<div class="muted" style="font-size:.75rem">Trail &amp; elevation API (optional — free tier works without one)</div>' +
+      '      <input id="setTrailsKey" type="text" spellcheck="false" autocomplete="off" placeholder="trail-…" value="' + esc(keys.trailsplitsApiKey || '') + '"></label>' +
+      '    <label>Grok (xAI) key<div class="muted" style="font-size:.75rem">Makes the trail assistant answer any question</div>' +
+      '      <input id="setGrokKey" type="text" spellcheck="false" autocomplete="off" placeholder="xai-…" value="' + esc(keys.grokApiKey || '') + '"></label>' +
+      '  </div>' +
+      '  <div class="btn-row" style="margin-top:18px">' +
+      '    <button type="button" class="btn btn-primary" id="settingsSave">Save keys</button>' +
+      '    <button type="button" class="btn btn-ghost" id="settingsCancel">Cancel</button>' +
+      '  </div>' +
+      '</div>';
+    document.body.appendChild(box);
+
+    function close() {
+      box.remove();
+      closeOverlay('settings');
+    }
+    qs('#settingsClose', box).addEventListener('click', close);
+    qs('#settingsCancel', box).addEventListener('click', close);
+    box.addEventListener('click', function (e) { if (e.target === box) close(); });
+    qs('#settingsSave', box).addEventListener('click', function () {
+      var payload = {
+        googleMapsApiKey: qs('#setGoogleKey', box).value.trim(),
+        trailsplitsApiKey: qs('#setTrailsKey', box).value.trim(),
+        grokApiKey: qs('#setGrokKey', box).value.trim()
+      };
+      try { localStorage.setItem('calledit_keys_v1', JSON.stringify(payload)); } catch (e) { }
+      ['googleMapsApiKey', 'trailsplitsApiKey', 'grokApiKey'].forEach(function (k) {
+        if (payload[k]) (window.CALLEDIT_CONFIG || {})[k] = payload[k];
+      });
+      close();
+      toast('Keys saved. Reloading so they take effect…');
+      setTimeout(function () { location.reload(); }, 700);
+    });
+    pushOverlay('settings', function () { box.remove(); });
   }
 
   /* ---------------- soft-keyboard watchdog ----------------
@@ -318,6 +462,12 @@
     device: device,
     directionsLinks: directionsLinks,
     installInstructions: installInstructions,
-    icons: ICONS
+    icons: ICONS,
+    /* overlays + Android back gesture */
+    pushOverlay: pushOverlay, popOverlay: popOverlay, closeOverlay: closeOverlay,
+    /* location services */
+    openLocationSettings: openLocationSettings, promptEnableLocation: promptEnableLocation,
+    /* settings */
+    openSettings: openSettings
   };
 })();

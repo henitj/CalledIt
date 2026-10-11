@@ -42,6 +42,43 @@
       </div>
     </section>
 
+    <!-- profile + pack-it-out log -->
+    <section class="section section--tight" aria-labelledby="profile-title">
+      <h2 class="section-title" id="profile-title">Your trail profile</h2>
+      <p class="section-sub">Add a photo, then log the litter you pack out. Points stay small on purpose — they’re a thank-you, not a score to grind.</p>
+      <div class="wrap" style="max-width:760px">
+        <div class="profile-card card card-pad">
+          <div class="avatar-wrap" title="Tap to change your photo" role="button" tabindex="0" aria-label="Change profile photo">
+            <img id="avatarImg" alt="Your profile photo" hidden>
+            <span id="avatarFallback" class="avatar-fallback">🙂</span>
+            <span class="avatar-edit">📷 Change photo</span>
+          </div>
+          <input id="avatarInput" type="file" accept="image/*" aria-label="Upload profile photo" hidden>
+          <div class="profile-meta">
+            <input id="profileName" type="text" maxlength="30" placeholder="Your name" aria-label="Your display name">
+            <div class="karma-line">🏆 <b id="karmaPoints">0</b> trail-karma points · <span id="karmaBags">0</span> bags packed out</div>
+            <p class="muted" style="font-size:.8rem">5 points per bag of litter (max 3 bags per log, 3 logs a day) — thanks for leaving the trail better! 💚</p>
+          </div>
+        </div>
+
+        <form class="report-form card card-pad" id="litterForm">
+          <h3 style="font-size:1.05rem">🧺 Log picked-up litter</h3>
+          <input id="litterTrail" type="text" maxlength="80" placeholder="Where? — e.g. River path (optional)">
+          <div class="litter-row">
+            <label for="litterBags">Bags of litter</label>
+            <select id="litterBags">
+              <option value="1">1 bag (5 pts)</option>
+              <option value="2">2 bags (10 pts)</option>
+              <option value="3">3 bags (15 pts)</option>
+            </select>
+          </div>
+          <textarea id="litterNote" rows="2" maxlength="200" placeholder="What did you find? (optional)"></textarea>
+          <button class="btn btn-primary" type="submit">Log it</button>
+        </form>
+        <div id="litterLog"></div>
+      </div>
+    </section>
+
     <!-- reports -->
     <section class="section" aria-labelledby="reports-title">
       <h2 class="section-title" id="reports-title">Trail conditions, by people who were just there</h2>

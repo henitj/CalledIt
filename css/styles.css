@@ -795,21 +795,6 @@ body.nav-hidden .nav-reopen { display: inline-flex; }
   .modal { border-radius: 24px; padding-bottom: 32px; }
 }
 @keyframes sheet-up { from { transform: translateY(60px); opacity: 0; } to { transform: none; opacity: 1; } }
-.modal__close {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  display: grid;
-  place-items: center;
-  width: 38px; height: 38px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--green-100);
-  color: var(--green-800);
-  font-size: 1.1rem;
-  font-weight: 800;
-  z-index: 2;
-}
 .modal h2 { font-size: 1.45rem; margin: 4px 0 8px; padding-right: 40px; }
 .modal .fact-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 14px 0; }
 @media (min-width: 560px) { .modal .fact-grid { grid-template-columns: repeat(3, 1fr); } }
@@ -1009,6 +994,192 @@ body.kb-open .assistant-sheet {
   border-radius: 18px;
 }
 body.kb-open .toast { bottom: 14px; }
+
+/* ---------------- modal close button (always reachable) ----------------
+   Sticky inside the modal’s scroll area: it stays in the top-right corner
+   while the details scroll and keeps a big tap target — the old absolute
+   ✕ could scroll away and become untappable on phones/WebView. */
+.modal__close {
+  position: sticky;
+  top: 8px;
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--green-100);
+  color: var(--green-800);
+  font-size: 1.1rem;
+  font-weight: 800;
+  z-index: 5;
+  box-shadow: var(--shadow-sm);
+}
+.modal__close svg { pointer-events: none; }
+
+/* ---------------- settings dialog (API keys) ---------------- */
+.settings-modal { max-width: 520px; }
+.settings-grid { display: grid; gap: 12px; margin-top: 14px; }
+.settings-grid label { display: grid; gap: 6px; font-weight: 700; font-size: .92rem; }
+.settings-grid input {
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  padding: 11px 14px;
+  font: inherit;
+  font-size: 16px;
+}
+.settings-grid input:focus { outline: none; border-color: var(--green-500); }
+.footer-link-btn {
+  border: 0;
+  background: transparent;
+  color: var(--green-600);
+  font: inherit;
+  font-size: inherit;
+  text-decoration: underline;
+  padding: 0;
+}
+
+/* ---------------- location-services prompt ---------------- */
+.loc-prompt {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  background: rgba(7, 33, 26, .55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.loc-prompt__card {
+  background: #fff;
+  border-radius: 20px;
+  padding: 22px;
+  max-width: 420px;
+  width: 100%;
+  box-shadow: var(--shadow-lg);
+}
+.loc-prompt__card h2 { font-size: 1.25rem; margin-bottom: 8px; }
+.loc-prompt__card p { color: var(--ink-soft); font-size: .95rem; }
+
+/* ---------------- live tracker panel (trails page) ---------------- */
+.track-panel {
+  background: #fff;
+  border: 1.5px solid var(--amber-400);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin: 12px 0 4px;
+  box-shadow: var(--shadow-sm);
+}
+.track-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+@media (min-width: 640px) { .track-stats { grid-template-columns: repeat(4, 1fr); } }
+.track-stat {
+  background: var(--green-50);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 10px;
+  text-align: center;
+}
+.track-stat .k {
+  font-size: .68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+}
+.track-stat .v { font-weight: 800; color: var(--green-800); font-size: 1.05rem; }
+.track-note { margin-top: 10px; font-size: .82rem; color: var(--muted); }
+.btn.is-on { box-shadow: 0 0 0 3px rgba(245, 158, 11, .45); }
+
+/* ---------------- profile card + litter log (social page) ---------------- */
+.profile-card {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  max-width: 860px;
+  margin: 0 auto 18px;
+  flex-wrap: wrap;
+}
+.avatar-wrap {
+  position: relative;
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--green-100);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+  border: 3px solid var(--green-500);
+}
+.avatar-wrap img { width: 100%; height: 100%; object-fit: cover; }
+.avatar-fallback { font-size: 2.6rem; font-weight: 800; color: var(--green-700); }
+.avatar-edit {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  background: rgba(7, 33, 26, .72);
+  color: #fff;
+  font-size: .68rem;
+  font-weight: 700;
+  text-align: center;
+  padding: 4px 2px;
+}
+.profile-meta { flex: 1 1 220px; display: grid; gap: 8px; }
+.profile-meta input {
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  padding: 11px 14px;
+  font: inherit;
+  font-size: 16px;
+  max-width: 320px;
+}
+.profile-meta input:focus { outline: none; border-color: var(--green-500); }
+.karma-line { font-size: 1.02rem; color: var(--green-800); }
+.litter-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--green-50);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+.litter-row select {
+  border: 1.5px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 16px;
+  background: #fff;
+}
+
+/* ---------------- assistant typing dots ---------------- */
+.msg--typing {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  min-height: 20px;
+}
+.msg--typing .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green-500);
+  animation: typing-bounce 1s infinite ease-in-out;
+}
+.msg--typing .dot:nth-child(2) { animation-delay: .15s; }
+.msg--typing .dot:nth-child(3) { animation-delay: .3s; }
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: none; opacity: .5; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
 
 /* reduced motion */
 @media (prefers-reduced-motion: reduce) {

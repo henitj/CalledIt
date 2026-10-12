@@ -2,7 +2,11 @@
  *
  * Network is mocked so tests are deterministic and work offline:
  *   - TrailSplits (real Zermatt data in test/fixtures), weather, POIs, loops
- *   - Google Places search + photo media, Wikimedia Commons photos
+ *   - Google Places search (NO photos by default — that is what the real API
+ *     returns for the configured key; opt googlePhotos:true adds them)
+ *   - Wikimedia Commons + Wikipedia geosearch, replaying REAL captured results
+ *     (test/fixtures/photo-pools.json) with real URL formats; the image hosts
+ *     refuse non-standard thumbnail widths exactly like Wikimedia’s CDN
  *   - map tiles (generated PNG), Puter.js (scripted Grok that makes tool calls)
  *   - Google Maps JS is blocked → exercises the Leaflet backup map
  *
@@ -12,6 +16,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -77,42 +82,101 @@ const PLACES_ZERMATT = [
   ['ChIJriffelsee', 'Riffelsee Lake', 45.9858, 7.7499, 4.9, 3410],
   ['ChIJzmutt', 'Zmutt Hamlet Walk', 46.0098, 7.7297, 4.6, 214]
 ];
-function placesResponse(set) {
-  return { places: set.map(([id, name, lat, lon, rating, count], i) => ({
+function placesResponse(set, withPhotos) {
+  return { places: set.map(([id, name, lat, lon, rating, count], i) => Object.assign({
     id, displayName: { text: name, languageCode: 'en' }, location: { latitude: lat, longitude: lon },
     rating, userRatingCount: count, formattedAddress: '3920 Zermatt, Switzerland',
-    googleMapsUri: 'https://maps.google.com/?cid=' + (1000 + i),
-    photos: [{ name: 'places/' + id + '/photos/PHOTO' + i, widthPx: 1600, heightPx: 1067 }]
-  })) };
+    googleMapsUri: 'https://maps.google.com/?cid=' + (1000 + i)
+  }, withPhotos ? { photos: [{ name: 'places/' + id + '/photos/PHOTO' + i, widthPx: 1600, heightPx: 1067,
+    authorAttributions: [{ displayName: 'Lena K.' }] }] } : {})) };
 }
 
-function commonsResponse(lat, lon) {
-  /* realistic mix: good landscape photos + junk the app must filter out */
+/* Real Commons / Wikipedia results (see test/fixtures/photo-pools.json) */
+const POOLS = JSON.parse(fs.readFileSync(path.join(ROOT, 'test/fixtures/photo-pools.json'), 'utf8'));
+export const STD_WIDTHS = [20, 40, 60, 120, 250, 330, 500, 960, 1280, 1920, 3840];
+const ARTISTS = ['<a href="//commons.wikimedia.org/wiki/User:Ximonic" title="User:Ximonic">Ximonic (Simo Räsänen)</a>',
+  'Alex Petrenko', '<a href="https://www.flickr.com/people/mendhak">mendhak</a>', 'Tiia Monto', '<span class="fn">Frank Schulenburg</span>'];
+const LICENSES = ['CC BY-SA 4.0', 'CC BY-SA 3.0', 'CC BY 2.0', 'CC BY-SA 4.0', 'Public domain'];
+function nearestPool(list, lat, lon) {
+  let best = null, bd = Infinity;
+  for (const p of list) {
+    const d = Math.hypot(p.lat - lat, (p.lon - lon) * Math.cos(lat * Math.PI / 180)) * 111.2;
+    if (d < bd) { bd = d; best = p; }
+  }
+  return { pool: best, km: bd };
+}
+/* Wikimedia file URLs: /x/xy/ from the md5 of the name; thumbnails only in
+   standard widths (rounded up, like the real API), unscaled original when
+   the file is narrower than that */
+function wmFile(file, w, wantW, site) {
+  const name = file.replace(/^File:/, '').replace(/ /g, '_');
+  const h = crypto.createHash('md5').update(name).digest('hex');
+  const enc = encodeURIComponent(name);
+  const std = STD_WIDTHS.find(x => x >= wantW) || 3840;
+  const utm = '?utm_source=' + (site || 'commons.wikimedia.org') + '&utm_campaign=' + (site ? 'api' : 'imageinfo') + '&utm_content=';
+  const original = 'https://upload.wikimedia.org/wikipedia/commons/' + h[0] + '/' + h.slice(0, 2) + '/' + enc;
+  if (w > std) {
+    return { thumb: 'https://thumb.wikimedia.org/wikipedia/commons/thumb/' + h[0] + '/' + h.slice(0, 2) + '/' + enc + '/' + std + 'px-' + enc +
+      (/\.tiff?$/i.test(name) ? '.jpg' : '') + utm + 'thumbnail', original: original + utm + 'original', id: parseInt(h.slice(0, 7), 16) };
+  }
+  return { thumb: original + utm + 'thumbnail_unscaled', original: original + utm + 'original', id: parseInt(h.slice(0, 7), 16) };
+}
+/* every captured file by page id (for prop=imageinfo&pageids=…) */
+const BY_ID = new Map();
+POOLS.commons.forEach(pool => pool.items.forEach((item, i) => BY_ID.set(wmFile(item[0], item[1], 960).id, { item, i, pool })));
+function imageinfoPage(item, i, want) {
+  const [title, w, h, mime] = item;
+  const f = wmFile(title, w, want || w);
+  const info = { size: w * h, width: w, height: h, mime, url: f.original, descriptionurl: 'https://commons.wikimedia.org/wiki/' + encodeURIComponent(title.replace(/ /g, '_')),
+    extmetadata: { Artist: { value: ARTISTS[i % ARTISTS.length] }, LicenseShortName: { value: LICENSES[i % LICENSES.length] } } };
+  if (want) Object.assign(info, { thumburl: f.thumb, thumbwidth: Math.min(want, w), thumbheight: Math.round(Math.min(want, w) * h / w) });
+  return { pageid: f.id, ns: 6, title, imagerepository: 'local', imageinfo: [info] };
+}
+function commonsResponse(u) {
+  const want = +(u.searchParams.get('iiurlwidth') || 0);
+  /* list=geosearch — nearest files first, titles + coordinates only */
+  if (u.searchParams.get('list') === 'geosearch') {
+    const [lat, lon] = (u.searchParams.get('gscoord') || '46|7').split('|').map(Number);
+    const limit = +(u.searchParams.get('gslimit') || 10), radius = +(u.searchParams.get('gsradius') || 1000);
+    const { pool, km } = nearestPool(POOLS.commons, lat, lon);
+    if (!pool || km > 6) return { batchcomplete: '', query: { geosearch: [] } };     /* nothing photographed out there */
+    const n = pool.items.length;
+    return { batchcomplete: '', query: { geosearch: pool.items.slice(0, limit).map((item, i) => {
+      const d = Math.round(radius * (i + 1) / (n + 1));
+      return { pageid: wmFile(item[0], item[1], 960).id, ns: 6, title: item[0], lat: lat + d / 111200, lon, dist: d, primary: '' };
+    }) } };
+  }
+  /* prop=imageinfo&pageids=… — details for chosen files */
+  if (u.searchParams.get('pageids')) {
+    const pages = {};
+    u.searchParams.get('pageids').split('|').forEach(id => {
+      const hit = BY_ID.get(+id);
+      pages[id] = hit ? imageinfoPage(hit.item, hit.i, want) : { pageid: +id, missing: '' };
+    });
+    return { batchcomplete: '', query: { pages } };
+  }
+  /* generator=geosearch + prop=imageinfo in one go (older app versions) */
+  const [lat, lon] = (u.searchParams.get('ggscoord') || '46|7').split('|').map(Number);
+  const limit = +(u.searchParams.get('ggslimit') || 10);
+  const { pool, km } = nearestPool(POOLS.commons, lat, lon);
+  if (!pool || km > 6) return { batchcomplete: '' };
   const pages = {};
-  const items = [
-    ['File:Risk Legacy.jpg', 1936, 2592, 'image/jpeg'],
-    ['File:Hand-Drawn Dungeon Map with Crosshatch Pattern.jpg', 1936, 2592, 'image/jpeg'],
-    ['File:Zermatt - Hohlicht West - Swisstopo 349817.tif', 7000, 4639, 'image/tiff'],
-    ['File:Matterhorn from the trail (' + lat.toFixed(3) + ').jpg', 5184, 3456, 'image/jpeg'],
-    ['File:Zmutttal view ' + lon.toFixed(3) + '.jpg', 4000, 2667, 'image/jpeg'],
-    ['File:Voting Machine (3003065716).jpg', 1024, 1280, 'image/jpeg'],
-    ['File:Zermatt City Hall 2019.jpg', 4000, 3000, 'image/jpeg'],
-    ['File:My dog at the lake.jpg', 3000, 2000, 'image/jpeg'],
-    ['File:DSC 0042.JPG', 4000, 2667, 'image/jpeg']
-  ];
-  items.forEach(([title, w, h, mime], i) => {
-    const id = Math.round(Math.abs(lat * 1000 + lon * 100)) * 10 + i;
-    const slug = encodeURIComponent(title.replace(/^File:/, '').replace(/ /g, '_'));
-    pages[id] = {
-      pageid: id, ns: 6, title, index: i,
-      imageinfo: [{
-        width: w, height: h, mime,
-        thumburl: 'https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ab/' + slug + '/500px-' + slug + (mime === 'image/tiff' ? '.jpg' : ''),
-        thumbwidth: 480, thumbheight: Math.round(480 * h / w),
-        descriptionurl: 'https://commons.wikimedia.org/wiki/' + encodeURIComponent(title.replace(/ /g, '_')),
-        extmetadata: { Artist: { value: '<a href="https://www.flickr.com/people/x">Björn S…</a>' }, LicenseShortName: { value: 'CC BY-SA 2.0' } }
-      }]
-    };
+  pool.items.slice(0, limit).forEach((item, i) => { const pg = imageinfoPage(item, i, want); pg.index = i - 1; pages[pg.pageid] = pg; });
+  return { batchcomplete: '', query: { pages } };
+}
+function wikipediaResponse(u) {
+  const [lat, lon] = (u.searchParams.get('ggscoord') || '46|7').split('|').map(Number);
+  const want = +(u.searchParams.get('pithumbsize') || 0);
+  const { pool, km } = nearestPool(POOLS.wikipedia, lat, lon);
+  if (!pool || km > 15) return { batchcomplete: '' };
+  const pages = {};
+  pool.pages.forEach(([title, description, plat, plon, file, w, h], i) => {
+    const f = wmFile(file, w, want || 320, 'en.wikipedia.org');
+    const tw = Math.min(w, STD_WIDTHS.find(x => x >= (want || 320)) || 3840);
+    pages[100000 + i] = { pageid: 100000 + i, ns: 0, title, index: i - 1, description, descriptionsource: 'local',
+      coordinates: [{ lat: plat, lon: plon, primary: '', globe: 'earth' }],
+      thumbnail: { source: f.thumb, width: tw, height: Math.round(tw * h / w) }, original: { source: f.original, width: w, height: h },
+      pageimage: file };
   });
   return { batchcomplete: '', query: { pages } };
 }
@@ -214,7 +278,7 @@ export const BRIDGE_MOCK = `(function () {
     promptEnableLocation: function () { window.__bridge.prompts++; return !window.__bridge.locationOn; },
     openLocationSettings: function () { window.__bridge.settings++; },
     isLocationOn: function () { return window.__bridge.locationOn; },
-    appVersion: function () { return '1.2.1'; }
+    appVersion: function () { return '1.2.2'; }
   };
 })();`;
 
@@ -223,9 +287,10 @@ const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers
 const json = (obj, status = 200) => ({ status, contentType: 'application/json', headers: CORS, body: JSON.stringify(obj) });
 
 export function makeRouter(opts = {}) {
-  const log = { external: [], blocked: [], apiCalls: [] };
+  const log = { external: [], blocked: [], apiCalls: [], badThumbs: [], wikimediaApi: [] };
   const scenario = opts.scenario || 'zermatt';
   let photoN = 0;
+  const busySeen = new Set();
   function route(req) {
     const url = req.url();
     const u = new URL(url);
@@ -275,20 +340,32 @@ export function makeRouter(opts = {}) {
           ['ChIJladybird', 'Lady Bird Lake Hike-and-Bike Trail', 30.2638, -97.7495, 4.8, 9010],
           ['ChIJbonnell', 'Mount Bonnell', 30.3207, -97.7735, 4.7, 12400],
           ['ChIJwalnut', 'Walnut Creek Metropolitan Park', 30.3995, -97.6812, 4.7, 3200]
-        ]));
-        return json(placesResponse(PLACES_ZERMATT));
+        ], !!opts.googlePhotos));
+        return json(placesResponse(PLACES_ZERMATT, !!opts.googlePhotos));
       }
       if (u.pathname.endsWith('/media')) {
         if (opts.googlePhotosFail) return { status: 403, contentType: 'text/plain', headers: CORS, body: 'denied' };
         return { status: 200, contentType: 'image/jpeg', headers: CORS, body: PHOTOS[(photoN++) % PHOTOS.length] };
       }
     }
-    if (host === 'commons.wikimedia.org') {
-      const coord = (u.searchParams.get('ggscoord') || '46|7').split('|').map(Number);
+    if (host === 'commons.wikimedia.org' || host === 'en.wikipedia.org') {
+      log.wikimediaApi.push(url);
+      /* Wikimedia's real “busy” answer: HTTP 200 with an error object */
+      if (opts.wikimediaBusyFirst && !busySeen.has(url)) {
+        busySeen.add(url);
+        return json({ error: { code: 'cirrussearch-too-busy-error', info: 'Search is currently too busy. Please try again later.' }, servedby: 'mw-api-ext.eqiad.main' });
+      }
       if (opts.commonsEmpty) return json({ batchcomplete: '' });
-      return json(commonsResponse(coord[0], coord[1]));
+      return json(host === 'en.wikipedia.org' ? wikipediaResponse(u) : commonsResponse(u));
     }
     if (host === 'thumb.wikimedia.org' || host === 'upload.wikimedia.org') {
+      /* Wikimedia's CDN refuses thumbnail widths outside the standard list */
+      const m = u.pathname.match(/\/(\d+)px-[^/]+$/);
+      if (u.pathname.includes('/thumb/') && m && !STD_WIDTHS.includes(+m[1])) {
+        log.badThumbs.push(url);
+        return { status: 400, contentType: 'text/html', headers: CORS, body: '<h1>Error</h1><p>Use thumbnail sizes listed on https://w.wiki/GHai</p>' };
+      }
+      if (opts.wikimediaImagesFail) return { status: 429, contentType: 'text/plain', headers: CORS, body: 'Too many requests' };
       return { status: 200, contentType: 'image/jpeg', headers: CORS, body: PHOTOS[(photoN++) % PHOTOS.length] };
     }
     if (/basemaps\.cartocdn\.com|tile\.opentopomap\.org|tile\.openstreetmap\.org/.test(host)) {

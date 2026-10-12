@@ -290,6 +290,7 @@ main { display: block; }
 /* ---------------- device card (home) ---------------- */
 .device-card {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);     /* never wider than the screen */
   gap: 18px;
   align-items: center;
   background: linear-gradient(135deg, var(--green-900), var(--green-700));
@@ -308,11 +309,13 @@ main { display: block; }
   margin-inline: auto;
 }
 .device-card ul { list-style: none; display: grid; gap: 10px; margin-top: 12px; }
-.device-card li { display: flex; gap: 10px; align-items: flex-start; }
-.device-card li::before { content: '✓'; color: var(--amber-400); font-weight: 800; }
+/* plain wrapping lines with the tick in the margin — as a flex row, every <b> in a
+   fact became its own unbreakable box and pushed the page wider than the phone */
+.device-card li { position: relative; padding-left: 22px; }
+.device-card li::before { content: '✓'; position: absolute; left: 0; top: 0; color: var(--amber-400); font-weight: 800; }
 .device-card .chip { background: rgba(255, 255, 255, .16); color: #fff; }
 @media (min-width: 820px) {
-  .device-card { grid-template-columns: auto 1fr; gap: clamp(22px, 4vw, 44px); }
+  .device-card { grid-template-columns: auto minmax(0, 1fr); gap: clamp(22px, 4vw, 44px); }
   .device-card__icon { width: 96px; height: 96px; font-size: 52px; margin: 0; }
 }
 
@@ -1332,3 +1335,10 @@ body.kb-open .toast { bottom: 14px; }
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--green-50, #f0fdf4);
 }
+
+/* v1.2.2 polish */
+.ico-inline { width: 1.05em; height: 1.05em; vertical-align: -0.18em; display: inline-block; }
+.modal .trail-desc { font-size: .9rem; margin-top: 6px; }
+/* the trail assistant's Ask button floats above the bottom bar — leave room so the
+   footer (and its Settings link) can scroll clear of it */
+body[data-page="trails"] { padding-bottom: calc(var(--nav-h) + var(--nav-gap) * 2 + 16px + 64px + var(--safe-b, 0px)); }

@@ -24,6 +24,7 @@ jobs:
           node --check js/start.js
           node --check js/trails.js
           node test/dom-check.js
+          node test/photo-check.js
           npm i --no-save --prefix /tmp/t jsdom@24
           NODE_PATH=/tmp/t/node_modules node test/assistant-check.js
           NODE_PATH=/tmp/t/node_modules node test/tracker-stress.js

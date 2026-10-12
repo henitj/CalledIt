@@ -1,0 +1,1835 @@
+{
+ "_about": "Real Wikimedia Commons (generator=geosearch, prop=imageinfo) and English Wikipedia (prop=pageimages|description|coordinates) results, captured 2026-10-12 with the same queries the app makes. Items are [title, width, height, mime] in the API's distance order; Wikipedia pages are [title, description, lat, lon, pageimage, width, height]. Exception: sizes of the five junk files in zermatt-centre were not captured and are approximate. The Swiss pools show a real problem: Swisstopo's geotagged aerial-survey TIFFs crowd the nearest results (23 of 24 near St. Niklaus); the Italian ones are full of ISS 'View of Earth' astronaut photos. Used by test/photo-check.js (scoring) and test/browser/harness.mjs (mocks).",
+ "commons": [
+  {
+   "name": "zermatt-centre",
+   "lat": 46.0199,
+   "lon": 7.7454,
+   "radius": 1500,
+   "items": [
+    [
+     "File:3920 Zermatt, Switzerland - panoramio (53).jpg",
+     1000,
+     667,
+     "image/jpeg"
+    ],
+    [
+     "File:Wanderwegweiser Zermatt Kirche 1636.jpg",
+     2448,
+     3264,
+     "image/jpeg"
+    ],
+    [
+     "File:Monte Rosa Hotel vehicle.jpg",
+     4000,
+     3000,
+     "image/jpeg"
+    ],
+    [
+     "File:3920 Zermatt, Switzerland - panoramio (55).jpg",
+     1000,
+     750,
+     "image/jpeg"
+    ],
+    [
+     "File:Bahnhofstrasse, Zermatt 2.jpg",
+     4000,
+     3000,
+     "image/jpeg"
+    ],
+    [
+     "File:Electric police vehicle.jpg",
+     4000,
+     3000,
+     "image/jpeg"
+    ],
+    [
+     "File:3920 Zermatt, Switzerland - panoramio (56).jpg",
+     667,
+     1000,
+     "image/jpeg"
+    ],
+    [
+     "File:Cor des alpes à Zermatt.jpg",
+     4000,
+     3000,
+     "image/jpeg"
+    ],
+    [
+     "File:Zermatt 2019.jpg",
+     3434,
+     1724,
+     "image/jpeg"
+    ],
+    [
+     "File:20240903.Ansichten von Zermatt.-029.2.jpg",
+     8971,
+     5048,
+     "image/jpeg"
+    ]
+   ]
+  },
+  {
+   "name": "hornliweg",
+   "lat": 45.9899,
+   "lon": 7.6879,
+   "radius": 2000,
+   "items": [
+    [
+     "File:Summer starwort Erinus alpinus (4805906667).jpg",
+     2000,
+     1333,
+     "image/jpeg"
+    ],
+    [
+     "File:Cynthias fritillary Euphydryas cynthia larva (4806530514).jpg",
+     1413,
+     942,
+     "image/jpeg"
+    ],
+    [
+     "File:Zermatt - trail.jpg",
+     2121,
+     3144,
+     "image/jpeg"
+    ],
+    [
+     "File:Trail near Matterhorn.jpg",
+     7878,
+     2463,
+     "image/jpeg"
+    ],
+    [
+     "File:Flower in Zermatt.jpg",
+     698,
+     686,
+     "image/jpeg"
+    ],
+    [
+     "File:Hörnliweg, Zermatt.jpg",
+     5472,
+     3648,
+     "image/jpeg"
+    ],
+    [
+     "File:Flowers in Zermatt.jpg",
+     1742,
+     1718,
+     "image/jpeg"
+    ],
+    [
+     "File:Hörnliweg - Matterhorn.jpg",
+     3834,
+     3529,
+     "image/jpeg"
+    ],
+    [
+     "File:Dent Blanche 2019.jpg",
+     1313,
+     698,
+     "image/jpeg"
+    ],
+    [
+     "File:Matterhorn 10.jpg",
+     5472,
+     3648,
+     "image/jpeg"
+    ],
+    [
+     "File:Matterhorn 11.jpg",
+     3737,
+     2010,
+     "image/jpeg"
+    ],
+    [
+     "File:Zermatt - trail 8.jpg",
+     3922,
+     3113,
+     "image/jpeg"
+    ],
+    [
+     "File:Trail to Matterhorn.jpg",
+     2727,
+     1818,
+     "image/jpeg"
+    ],
+    [
+     "File:Rock formation in Zermatt 3.jpg",
+     1616,
+     792,
+     "image/jpeg"
+    ],
+    [
+     "File:Rock formation in Zermatt 2.jpg",
+     2424,
+     2038,
+     "image/jpeg"
+    ],
+    [
+     "File:Hiking sign in Zermatt.jpg",
+     5307,
+     3531,
+     "image/jpeg"
+    ],
+    [
+     "File:Zmutttal 20190717 114608.jpg",
+     4608,
+     2592,
+     "image/jpeg"
+    ],
+    [
+     "File:Zermatt 20190717 113158.jpg",
+     4608,
+     2592,
+     "image/jpeg"
+    ],
+    [
+     "File:Zermatt - Hörnli Nord - Swisstopo 350195.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Zermatt - Hörnli Nord - Swisstopo 350199.tif",
+     7000,
+     4641,
+     "image/tiff"
+    ],
+    [
+     "File:Zermatt - Hörnli Süd - Swisstopo 350255.tif",
+     7000,
+     4641,
+     "image/tiff"
+    ]
+   ]
+  },
+  {
+   "name": "five-lakes",
+   "lat": 46.0113,
+   "lon": 7.7901,
+   "radius": 2000,
+   "items": [
+    [
+     "File:Lackey moth Malacosoma neustria larva (4827029435).jpg",
+     1414,
+     943,
+     "image/jpeg"
+    ],
+    [
+     "File:Cypress spurge Euphorbia cyparissias (4827032629).jpg",
+     2381,
+     1586,
+     "image/jpeg"
+    ],
+    [
+     "File:Alpine birdsfoot trefoil Lotus alpinus (4827638800).jpg",
+     3008,
+     2000,
+     "image/jpeg"
+    ],
+    [
+     "File:Mountain alison Alyssum montanum (4827033077).jpg",
+     3008,
+     2000,
+     "image/jpeg"
+    ],
+    [
+     "File:Zermatt (5064621225).jpg",
+     1000,
+     664,
+     "image/jpeg"
+    ],
+    [
+     "File:Tällinen's area's sight toward \"Matterhorn\" on summer - panoramio.jpg",
+     4896,
+     2754,
+     "image/jpeg"
+    ],
+    [
+     "File:Grinjesee's area's sight toward \"Findelgletscher\" on summer - panoramio.jpg",
+     4896,
+     2754,
+     "image/jpeg"
+    ],
+    [
+     "File:Grinjesee's area's sight toward \"Findelgletscher\" on summer - panoramio (1).jpg",
+     4896,
+     3672,
+     "image/jpeg"
+    ],
+    [
+     "File:Matterhorn & wooden cottages, March 2019 (03).jpg",
+     3986,
+     5979,
+     "image/jpeg"
+    ],
+    [
+     "File:Flower in Zermatt 3.jpg",
+     1212,
+     828,
+     "image/jpeg"
+    ],
+    [
+     "File:Trail between Blauherd and Stellisee.jpg",
+     7451,
+     2799,
+     "image/jpeg"
+    ],
+    [
+     "File:Unterrothorn 2.jpg",
+     3434,
+     633,
+     "image/jpeg"
+    ],
+    [
+     "File:Zermatt - trail 6.jpg",
+     5472,
+     3648,
+     "image/jpeg"
+    ],
+    [
+     "File:Grindjisee.jpg",
+     2424,
+     1014,
+     "image/jpeg"
+    ],
+    [
+     "File:Grindjisee - trail.jpg",
+     3434,
+     1521,
+     "image/jpeg"
+    ],
+    [
+     "File:Plant in Zermatt 2.jpg",
+     888,
+     1230,
+     "image/jpeg"
+    ],
+    [
+     "File:Grindjisee 2.jpg",
+     1313,
+     741,
+     "image/jpeg"
+    ],
+    [
+     "File:Trail Stellisee-Blauherd.jpg",
+     2626,
+     1482,
+     "image/jpeg"
+    ],
+    [
+     "File:Unterrothorn 2019.jpg",
+     2121,
+     1095,
+     "image/jpeg"
+    ],
+    [
+     "File:Trail Stellisee-Blauherd 2.jpg",
+     2424,
+     1368,
+     "image/jpeg"
+    ],
+    [
+     "File:Trail to Stellisee.jpg",
+     1646,
+     929,
+     "image/jpeg"
+    ],
+    [
+     "File:Zermatt - mountain view 2.jpg",
+     4545,
+     983,
+     "image/jpeg"
+    ],
+    [
+     "File:Zermatt Tour 10.jpg",
+     3200,
+     1800,
+     "image/jpeg"
+    ],
+    [
+     "File:Zermatt Tour 11.jpg",
+     1800,
+     3200,
+     "image/jpeg"
+    ],
+    [
+     "File:CH.VS.Zermatt Sunnegga Grindjisee Matterhorn 9034 16x9-R 16K.jpg",
+     16384,
+     9216,
+     "image/jpeg"
+    ],
+    [
+     "File:Grindjisee Matterhorn.jpg",
+     4032,
+     2268,
+     "image/jpeg"
+    ],
+    [
+     "File:Grindjisee hiking trail.jpg",
+     4032,
+     2268,
+     "image/jpeg"
+    ],
+    [
+     "File:Grindjisee 20190716 110955.jpg",
+     4608,
+     2592,
+     "image/jpeg"
+    ],
+    [
+     "File:Jakob und Linda.jpg",
+     3968,
+     2232,
+     "image/jpeg"
+    ],
+    [
+     "File:Glassy Grindjisee - Flickr - mendhak.jpg",
+     6000,
+     4000,
+     "image/jpeg"
+    ]
+   ]
+  },
+  {
+   "name": "glacier-trail",
+   "lat": 45.9806,
+   "lon": 7.7063,
+   "radius": 2000,
+   "items": [
+    [
+     "File:Schwarzsee (14780393510).jpg",
+     5184,
+     3456,
+     "image/jpeg"
+    ],
+    [
+     "File:2008-07-23 Schwarzsee (Zermatt) - 6.jpg",
+     2700,
+     1800,
+     "image/jpeg"
+    ],
+    [
+     "File:2008-07-23 Schwarzsee (Zermatt) - 5.jpg",
+     2700,
+     1800,
+     "image/jpeg"
+    ],
+    [
+     "File:2008-07-23 Schwarzsee (Zermatt) - 7.jpg",
+     2700,
+     1800,
+     "image/jpeg"
+    ],
+    [
+     "File:2008-07-23 Matterhorn - 2.jpg",
+     2700,
+     1800,
+     "image/jpeg"
+    ],
+    [
+     "File:Matterhorn - panoramio (1).jpg",
+     3872,
+     2592,
+     "image/jpeg"
+    ],
+    [
+     "File:3920 Zermatt, Switzerland - panoramio (18).jpg",
+     1000,
+     563,
+     "image/jpeg"
+    ],
+    [
+     "File:3920 Zermatt, Switzerland - panoramio (19).jpg",
+     1000,
+     667,
+     "image/jpeg"
+    ],
+    [
+     "File:3920 Zermatt, Switzerland - panoramio (21).jpg",
+     667,
+     1000,
+     "image/jpeg"
+    ],
+    [
+     "File:Matterhorn Cervino 4478 m - panoramio (1).jpg",
+     4608,
+     2615,
+     "image/jpeg"
+    ],
+    [
+     "File:Matterhorn Cervino 4478 m - panoramio (2).jpg",
+     4608,
+     3456,
+     "image/jpeg"
+    ],
+    [
+     "File:Zermatt - panoramio (7).jpg",
+     4608,
+     3456,
+     "image/jpeg"
+    ],
+    [
+     "File:View direction Zermatt - panoramio.jpg",
+     4608,
+     2699,
+     "image/jpeg"
+    ],
+    [
+     "File:Between Schwarzsee and Trockener Steg - panoramio.jpg",
+     4608,
+     2304,
+     "image/jpeg"
+    ],
+    [
+     "File:Matterhorn Glacier Trail.jpg",
+     10222,
+     2241,
+     "image/jpeg"
+    ],
+    [
+     "File:Matterhorn Glacier Trail 2.jpg",
+     10222,
+     1745,
+     "image/jpeg"
+    ],
+    [
+     "File:Glacier in Zermatt.jpg",
+     2424,
+     1010,
+     "image/jpeg"
+    ],
+    [
+     "File:Zermatt - lake.jpg",
+     5984,
+     2468,
+     "image/jpeg"
+    ],
+    [
+     "File:Zermatt - lake and glacier.jpg",
+     2424,
+     1199,
+     "image/jpeg"
+    ],
+    [
+     "File:Schwarzsee in Zermatt.jpg",
+     4714,
+     2950,
+     "image/jpeg"
+    ],
+    [
+     "File:Schwarzsee and trail.jpg",
+     4646,
+     1701,
+     "image/jpeg"
+    ],
+    [
+     "File:Schwarzsee station 2.jpg",
+     1616,
+     574,
+     "image/jpeg"
+    ],
+    [
+     "File:Loose rock in Zermatt.jpg",
+     3737,
+     1400,
+     "image/jpeg"
+    ],
+    [
+     "File:White stripe on rock.jpg",
+     1616,
+     2424,
+     "image/jpeg"
+    ],
+    [
+     "File:Furgg Glacier.jpg",
+     5567,
+     1437,
+     "image/jpeg"
+    ],
+    [
+     "File:Zermatt - mountains.jpg",
+     1919,
+     399,
+     "image/jpeg"
+    ],
+    [
+     "File:Matterhorn Glacier Trail 6.jpg",
+     3394,
+     1525,
+     "image/jpeg"
+    ],
+    [
+     "File:Matterhorn Glacier Trail 7.jpg",
+     3434,
+     2277,
+     "image/jpeg"
+    ],
+    [
+     "File:13-Schwarzsee-NW.jpg",
+     4240,
+     2832,
+     "image/jpeg"
+    ],
+    [
+     "File:Hohtälli mit Gornergrat, Riffelhorn mit Gagenhaupt vor Monte Rosa Nordend und Dufourspitze - vom Wanderweg am Schwarzsee bei Zermatt (cropped).jpg",
+     1645,
+     1017,
+     "image/jpeg"
+    ]
+   ]
+  },
+  {
+   "name": "austin-barton-creek",
+   "lat": 30.2563,
+   "lon": -97.788,
+   "radius": 3000,
+   "items": [
+    [
+     "File:Zilker elementary 2008.jpg",
+     1429,
+     840,
+     "image/jpeg"
+    ],
+    [
+     "File:Risk Legacy.jpg",
+     1936,
+     2592,
+     "image/jpeg"
+    ],
+    [
+     "File:Downtown from Zilker Park.JPG",
+     2560,
+     1920,
+     "image/jpeg"
+    ],
+    [
+     "File:Kayaking in Barton Springs.JPG",
+     2560,
+     1920,
+     "image/jpeg"
+    ],
+    [
+     "File:Gus Fruh - panoramio.jpg",
+     1600,
+     1200,
+     "image/jpeg"
+    ],
+    [
+     "File:Argemone albiflora Zilker Park.jpg",
+     3024,
+     3213,
+     "image/jpeg"
+    ],
+    [
+     "File:Gaillardia pulchella Zilker Park.jpg",
+     2452,
+     2384,
+     "image/jpeg"
+    ],
+    [
+     "File:Monarda sp. Zilker Park.jpg",
+     2293,
+     3576,
+     "image/jpeg"
+    ],
+    [
+     "File:Gus Fruh - View from the Birthday Rock - panoramio.jpg",
+     1936,
+     2592,
+     "image/jpeg"
+    ],
+    [
+     "File:Barton Creek Greenbelt - Gus Fruh Park - panoramio.jpg",
+     7152,
+     1080,
+     "image/jpeg"
+    ],
+    [
+     "File:Barton Creek Greenbelt - Gus Fruh Park - panoramio (1).jpg",
+     4912,
+     1920,
+     "image/jpeg"
+    ],
+    [
+     "File:Barton Creek Greenbelt - Gus Fruh Park - panoramio (2).jpg",
+     7152,
+     1080,
+     "image/jpeg"
+    ],
+    [
+     "File:Barton Creek Greenbelt - Gus Fruh Park - panoramio (3).jpg",
+     4912,
+     1920,
+     "image/jpeg"
+    ],
+    [
+     "File:Barton Creek Greenbelt - Gus Fruh - panoramio.jpg",
+     4912,
+     1920,
+     "image/jpeg"
+    ],
+    [
+     "File:Barton Creek Greenbelt - Gus Fruh - panoramio (1).jpg",
+     1920,
+     4912,
+     "image/jpeg"
+    ],
+    [
+     "File:Gus Fruh Cannonball - panoramio.jpg",
+     7152,
+     1080,
+     "image/jpeg"
+    ],
+    [
+     "File:Barton Creek Greenbelt - Gus Fruh - panoramio (2).jpg",
+     4912,
+     1920,
+     "image/jpeg"
+    ],
+    [
+     "File:Hand-Drawn Dungeon Map with Crosshatch Pattern.jpg",
+     1936,
+     2592,
+     "image/jpeg"
+    ],
+    [
+     "File:Number 1 (106238549).jpeg",
+     1920,
+     859,
+     "image/jpeg"
+    ],
+    [
+     "File:CVC - South Lamar.jpg",
+     4032,
+     3024,
+     "image/jpeg"
+    ],
+    [
+     "File:Voting Machine (3003065716).jpg",
+     1024,
+     1280,
+     "image/jpeg"
+    ],
+    [
+     "File:Child with head bump.jpg",
+     1936,
+     2592,
+     "image/jpeg"
+    ],
+    [
+     "File:Candied Ginger (IMG 7223).jpg",
+     2592,
+     1936,
+     "image/jpeg"
+    ],
+    [
+     "File:Neighborhood ATX-25.jpg",
+     5269,
+     3946,
+     "image/jpeg"
+    ],
+    [
+     "File:Neighborhood ATX-26.jpg",
+     14400,
+     6100,
+     "image/jpeg"
+    ],
+    [
+     "File:Neighborhood ATX-28.jpg",
+     5196,
+     3891,
+     "image/jpeg"
+    ],
+    [
+     "File:Austin, Texas Aerial view in December 2024.jpg",
+     3102,
+     5514,
+     "image/jpeg"
+    ],
+    [
+     "File:Pseudouroctonus reddelli 330287321.jpg",
+     2048,
+     1536,
+     "image/jpeg"
+    ],
+    [
+     "File:Celestin Nanteuil self-portrait pastel 1830.jpg",
+     2388,
+     3174,
+     "image/jpeg"
+    ],
+    [
+     "File:Célestin Nanteuil--etching by Charles Chaplin.jpg",
+     2742,
+     3690,
+     "image/jpeg"
+    ],
+    [
+     "File:Louis Hector Leroux--Temple de Pandrose et l'Erechtéion--1872.jpg",
+     2604,
+     1832,
+     "image/jpeg"
+    ],
+    [
+     "File:Louis Hector Leroux--Périclès et Aspasie visitant l'atelier de Phidias--1898.jpg",
+     2994,
+     1345,
+     "image/jpeg"
+    ],
+    [
+     "File:Bernard Bernard author--frontispiece Sex Conduct in Marriage 1922.jpg",
+     2661,
+     3897,
+     "image/jpeg"
+    ]
+   ]
+  },
+  {
+   "name": "randa-st-niklaus",
+   "lat": 46.1217,
+   "lon": 7.8167,
+   "radius": 5000,
+   "items": [
+    [
+     "File:Aerial image of Weisshorn (view from the east).jpg",
+     4200,
+     3200,
+     "image/jpeg"
+    ],
+    [
+     "File:St. Niklaus - Galenhorn - Swisstopo 350291.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Galenhorn - Swisstopo 350293.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Galenhorn - Swisstopo 350295.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Galenhorn - Swisstopo 350300.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Galenhorn - Swisstopo 350302.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Galenhorn - Swisstopo 350297.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Galenhorn - Swisstopo 350304.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Galenhorn - Swisstopo 350306.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Galenhorn - Swisstopo 350308.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Hohberg - Swisstopo 350310.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Hohberg - Swisstopo 350312.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Hohberg - Swisstopo 350314.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Hohberg - Swisstopo 350309.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Hohberg - Swisstopo 350311.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Hohberg - Swisstopo 350313.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Dürrenhorn Grat - Swisstopo 350330.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Dürrenhorn Grat - Swisstopo 350336.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Dürrenhorn Grat - Swisstopo 350334.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Dürrenhorn Grat - Swisstopo 350340.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Dürrenhorn Grat - Swisstopo 350344.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Dürrenhorn Grat - Swisstopo 350337.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Dürrenhorn Grat - Swisstopo 350341.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Dürrenhorn Grat - Swisstopo 350346.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:St. Niklaus - Dürrenhorn Grat - Swisstopo 350331.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ]
+   ]
+  },
+  {
+   "name": "saas-almagell",
+   "lat": 46.1032,
+   "lon": 7.9466,
+   "radius": 5000,
+   "items": [
+    [
+     "File:Polemonium caeruleum (white flowers).jpg",
+     2514,
+     3355,
+     "image/jpeg"
+    ],
+    [
+     "File:F 18 in the mountains (7795771960).jpg",
+     1920,
+     1280,
+     "image/jpeg"
+    ],
+    [
+     "File:Alphubel (7825109962).jpg",
+     4928,
+     3264,
+     "image/jpeg"
+    ],
+    [
+     "File:Abenteuerwald Saas-Fee.jpg",
+     3840,
+     2160,
+     "image/jpeg"
+    ],
+    [
+     "File:Blick nach Saas-Almagell.jpg",
+     4000,
+     2250,
+     "image/jpeg"
+    ],
+    [
+     "File:Saas-Almagell 360 Grad Aufnahme.jpg",
+     19346,
+     9673,
+     "image/jpeg"
+    ],
+    [
+     "File:Saas-Fee mountains.jpg",
+     5295,
+     3577,
+     "image/jpeg"
+    ],
+    [
+     "File:Entry to recycling.jpg",
+     8059,
+     3013,
+     "image/jpeg"
+    ],
+    [
+     "File:Saas-Fee mit Mischabelgruppe.jpg",
+     5847,
+     3442,
+     "image/jpeg"
+    ],
+    [
+     "File:Almagellerhorn im Herbst.jpg",
+     4000,
+     2250,
+     "image/jpeg"
+    ],
+    [
+     "File:Plattjen Bergstation.jpg",
+     4096,
+     2304,
+     "image/jpeg"
+    ],
+    [
+     "File:Saas-Fee aus der Luft, 2025.jpg",
+     4024,
+     2260,
+     "image/jpeg"
+    ],
+    [
+     "File:Saastal - Plattje Ost - Swisstopo 352365.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Plattje Ost - Swisstopo 352363.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Plattje Ost - Swisstopo 352367.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Plattje Ost - Swisstopo 352360.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Plattje Ost - Swisstopo 352368.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Plattje Ost - Swisstopo 352372.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Plattje Ost - Swisstopo 352358.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Plattje Ost - Swisstopo 352370.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Plattje Nord - Swisstopo 352389.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Weissfluh - Swisstopo 355956.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Weissfluh - Swisstopo 355957.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Weissfluh - Swisstopo 355959.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Weissfluh - Swisstopo 355961.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ]
+   ]
+  },
+  {
+   "name": "saas-balen",
+   "lat": 46.1553,
+   "lon": 7.9122,
+   "radius": 5000,
+   "items": [
+    [
+     "File:Niedergut, 2019.jpg",
+     4000,
+     2250,
+     "image/jpeg"
+    ],
+    [
+     "File:Skilift Bodu in Saas-Balen VS.jpg",
+     4000,
+     2250,
+     "image/jpeg"
+    ],
+    [
+     "File:Pistenfahrzeug im Wallis.jpg",
+     4000,
+     2250,
+     "image/jpeg"
+    ],
+    [
+     "File:Saas-Balen 2019.jpg",
+     4000,
+     2250,
+     "image/jpeg"
+    ],
+    [
+     "File:Dorfausgang Richtung Visp.jpg",
+     4000,
+     2250,
+     "image/jpeg"
+    ],
+    [
+     "File:Saas-Balen by night, 2024 3.jpg",
+     4000,
+     2250,
+     "image/jpeg"
+    ],
+    [
+     "File:Saastal - Schilthorn Ost - Swisstopo 352616.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Ost - Swisstopo 352618.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Ost - Swisstopo 352619.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Ost - Swisstopo 352620.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Ost - Swisstopo 352617.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Ost - Swisstopo 352622.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Ost - Swisstopo 352624.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Ost - Swisstopo 352623.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Ost - Swisstopo 352626.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Ost - Swisstopo 352621.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Ost - Swisstopo 352627.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Ost - Swisstopo 352625.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Süd - Swisstopo 352628.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Süd - Swisstopo 352630.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Süd - Swisstopo 352632.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Süd - Swisstopo 352634.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Süd - Swisstopo 352629.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Süd - Swisstopo 352636.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Süd - Swisstopo 352633.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Süd - Swisstopo 352638.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Süd - Swisstopo 352637.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Süd - Swisstopo 352631.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Süd - Swisstopo 352635.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ],
+    [
+     "File:Saastal - Schilthorn Süd - Swisstopo 352639.tif",
+     7000,
+     4639,
+     "image/tiff"
+    ]
+   ]
+  },
+  {
+   "name": "breuil-cervinia",
+   "lat": 45.9085,
+   "lon": 7.6812,
+   "radius": 5000,
+   "items": [
+    [
+     "File:Sua Maestà il Cervino - panoramio.jpg",
+     4752,
+     3168,
+     "image/jpeg"
+    ],
+    [
+     "File:Dent d'Herens da Cervinia - Cime Bianche - panoramio.jpg",
+     1600,
+     1067,
+     "image/jpeg"
+    ],
+    [
+     "File:Matterhorn Cervino 4478 m - panoramio (4).jpg",
+     4608,
+     2738,
+     "image/jpeg"
+    ],
+    [
+     "File:Bar Igloo at ski run Gran Sometta - panoramio.jpg",
+     4608,
+     2693,
+     "image/jpeg"
+    ],
+    [
+     "File:Bar Baitta Grand Sometta - panoramio.jpg",
+     4608,
+     3456,
+     "image/jpeg"
+    ],
+    [
+     "File:Ristorante near Golle Superiore Cime Bianche 2982 m - panoramio.jpg",
+     4608,
+     3456,
+     "image/jpeg"
+    ],
+    [
+     "File:Ristorante - panoramio (3).jpg",
+     4608,
+     2841,
+     "image/jpeg"
+    ],
+    [
+     "File:Panorama Colle inf. Cime Bianche 2896 m to Valtourenche and Valle D'aosta - panoramio.jpg",
+     3200,
+     560,
+     "image/jpeg"
+    ],
+    [
+     "File:View direction Valtourenche and Valle D'aosta from Colle inf. Cime Bianche 2896 m - panoramio.jpg",
+     4608,
+     2932,
+     "image/jpeg"
+    ],
+    [
+     "File:STS132-E-12609 - View of Earth.jpg",
+     4256,
+     2913,
+     "image/jpeg"
+    ],
+    [
+     "File:ISS045-E-171038 - View of Earth.jpg",
+     4928,
+     3280,
+     "image/jpeg"
+    ],
+    [
+     "File:ISS045-E-171037 - View of Earth.jpg",
+     4928,
+     3280,
+     "image/jpeg"
+    ],
+    [
+     "File:ISS052-E-76812 - View of Earth.jpg",
+     4928,
+     3280,
+     "image/jpeg"
+    ],
+    [
+     "File:ISS053-E-389976 - View of Earth.jpg",
+     5568,
+     3712,
+     "image/jpeg"
+    ],
+    [
+     "File:ISS018-E-13034 - View of Earth.jpg",
+     3072,
+     2040,
+     "image/jpeg"
+    ],
+    [
+     "File:ISS036-E-37098 - View of Earth.jpg",
+     2832,
+     4256,
+     "image/jpeg"
+    ],
+    [
+     "File:ISS065-E-351508 - View of Earth.jpg",
+     5568,
+     3712,
+     "image/jpeg"
+    ]
+   ]
+  },
+  {
+   "name": "alagna",
+   "lat": 45.9108,
+   "lon": 7.9316,
+   "radius": 5000,
+   "items": [
+    [
+     "File:13021 Alagna Valsesia, Province of Vercelli, Italy - panoramio.jpg",
+     3872,
+     2592,
+     "image/jpeg"
+    ],
+    [
+     "File:Salita al Rifugio Zamboni (2).jpg",
+     2560,
+     1920,
+     "image/jpeg"
+    ],
+    [
+     "File:Zamboni 2012 (2).jpg",
+     3264,
+     2075,
+     "image/jpeg"
+    ],
+    [
+     "File:Zamboni 2017 (2).jpg",
+     2272,
+     1704,
+     "image/jpeg"
+    ],
+    [
+     "File:Catena del Monte Rosa 10.jpg",
+     4608,
+     3456,
+     "image/jpeg"
+    ],
+    [
+     "File:Catena del Monte Rosa 16.jpg",
+     4608,
+     3456,
+     "image/jpeg"
+    ],
+    [
+     "File:Lago delle Locce 1.jpg",
+     3456,
+     4608,
+     "image/jpeg"
+    ],
+    [
+     "File:Lago delle Locce.jpg",
+     3456,
+     4608,
+     "image/jpeg"
+    ],
+    [
+     "File:Catena Monte Rosa dal Belvedere 5.jpg",
+     2272,
+     1704,
+     "image/jpeg"
+    ],
+    [
+     "File:Catena Monte Rosa dal Belvedere 7.jpg",
+     1704,
+     2272,
+     "image/jpeg"
+    ],
+    [
+     "File:Cima Jazzi, Monte Rosa.jpg",
+     2048,
+     1365,
+     "image/jpeg"
+    ],
+    [
+     "File:STS132-E-12610 - View of Earth.jpg",
+     4256,
+     2913,
+     "image/jpeg"
+    ],
+    [
+     "File:ISS050-E-20479 - View of Earth.jpg",
+     4928,
+     3280,
+     "image/jpeg"
+    ],
+    [
+     "File:Montagne (19474195869).jpg",
+     10157,
+     4713,
+     "image/jpeg"
+    ],
+    [
+     "File:ISS031-E-86043 - View of Earth.jpg",
+     4256,
+     2832,
+     "image/jpeg"
+    ],
+    [
+     "File:ISS065-E-351512 - View of Earth.jpg",
+     5568,
+     3712,
+     "image/jpeg"
+    ],
+    [
+     "File:Aerial image of the Monte Rosa east face (view from the east).jpg",
+     5400,
+     3400,
+     "image/jpeg"
+    ]
+   ]
+  }
+ ],
+ "wikipedia": [
+  {
+   "name": "zermatt",
+   "lat": 46.0207,
+   "lon": 7.7491,
+   "pages": [
+    [
+     "Zermatt",
+     "Place in Valais, Switzerland",
+     46.01666667,
+     7.75,
+     "1_zermatt_evening_2022.jpg",
+     9746,
+     9200
+    ],
+    [
+     "Gornergrat Infrared Telescope",
+     "Infrared telescope in Switzerland",
+     45.9834,
+     7.7836,
+     "GornegratTelescope.JPG",
+     1280,
+     960
+    ],
+    [
+     "KOSMA",
+     "Observatory",
+     45.9844,
+     7.7858,
+     "Gornergrat_HPS_DSC03970_2_crop.jpg",
+     615,
+     431
+    ],
+    [
+     "Gornergrat Railway",
+     "Mountain rack railway, located in the Swiss canton of Valais",
+     46.02361111,
+     7.74972222,
+     "Gornergrat_railway.JPG",
+     4320,
+     3201
+    ],
+    [
+     "Gorner Glacier",
+     "Glacier on the Monte Rosa massif",
+     45.96972222,
+     7.80166667,
+     "Gornergletscher.jpeg",
+     522,
+     768
+    ],
+    [
+     "Täsch",
+     "Municipality in Valais, Switzerland",
+     46.06666667,
+     7.76666667,
+     "Täsch.jpg",
+     499,
+     333
+    ],
+    [
+     "Ober Gabelhorn",
+     "Mountain in the Pennine Alps in Switzerland",
+     46.03833333,
+     7.66777778,
+     "OberGabelhorn.jpg",
+     1600,
+     900
+    ],
+    [
+     "Zinalrothorn",
+     "Mountain in the Pennine Alps",
+     46.06472222,
+     7.69,
+     "Aerial_image_of_Zinalrothorn_(view_from_the_west).jpg",
+     5300,
+     3300
+    ],
+    [
+     "Zmutt",
+     "Swiss village",
+     46.00638889,
+     7.71694444,
+     "Zmutt.jpg",
+     2100,
+     1400
+    ],
+    [
+     "Gornergrat",
+     "Mountain in Switzerland",
+     45.98333333,
+     7.78472222,
+     "Gornergrat.jpg",
+     803,
+     614
+    ],
+    [
+     "Matterhorn Museum",
+     "Museum in Zermatt",
+     46.01972222,
+     7.74611111,
+     "Matterhorn_museum.jpg",
+     1600,
+     1200
+    ],
+    [
+     "Mettelhorn",
+     "Mountain of the Swiss Pennine Alps",
+     46.05722222,
+     7.7425,
+     "Randa_landslide.JPG",
+     3072,
+     2304
+    ],
+    [
+     "Rote Nase",
+     "Mountain in Switzerland",
+     45.98666667,
+     7.81111111,
+     "Funivia_Rote_Nase_alt.JPG",
+     3580,
+     2387
+    ],
+    [
+     "Oberrothorn",
+     "Mountain of the Swiss Pennine Alps",
+     46.0275,
+     7.81277778,
+     "Oberrothorn_Gipfel_mit_Dom_und_Täschhorn.jpg",
+     1216,
+     912
+    ],
+    [
+     "Trifthorn",
+     "Mountain in Switzerland",
+     46.05152778,
+     7.67833333,
+     "Valais_mountains.jpg",
+     1280,
+     960
+    ],
+    [
+     "Unter Gabelhorn",
+     "Mountain in Switzerland",
+     46.02630556,
+     7.69747222,
+     "Ober_Gabelhorn,_2010_July.JPG",
+     2447,
+     1717
+    ]
+   ]
+  },
+  {
+   "name": "austin",
+   "lat": 30.2672,
+   "lon": -97.7431,
+   "pages": [
+    [
+     "Austin, Texas",
+     "Capital city of Texas, United States",
+     30.26722222,
+     -97.74305556,
+     "Skyline_of_Austin,_Texas_(cropped).jpg",
+     10242,
+     5636
+    ],
+    [
+     "Congress Avenue Historic District",
+     "Historic district in Texas, United States",
+     30.26777778,
+     -97.7425,
+     "CongressAveJul2010.JPG",
+     1755,
+     1170
+    ],
+    [
+     "Driskill Hotel",
+     "Hotel in Austin, Texas",
+     30.26805556,
+     -97.74166667,
+     "Driskill_Hotel_(54986346667).jpg",
+     7424,
+     4949
+    ],
+    [
+     "Frost Bank Tower",
+     "Skyscraper in Austin, Texas",
+     30.266489,
+     -97.742689,
+     "FrostTower-Feb2009.JPG",
+     1522,
+     2876
+    ],
+    [
+     "Greater Austin",
+     "Metropolitan statistical area in Texas, United States",
+     30.26722222,
+     -97.74305556,
+     "View_of_Downtown_Austin_from_Pfluger_Pedestrian_Bridge_October_2022.jpg",
+     3744,
+     2106
+    ],
+    [
+     "Central Presbyterian Church (Austin, Texas)",
+     "Historic church in Texas, United States",
+     30.269685,
+     -97.74028,
+     "CPC-Bartoli-20240918.png",
+     640,
+     513
+    ],
+    [
+     "Rollingwood, Texas",
+     "City in Texas, United States",
+     30.27361111,
+     -97.78694444,
+     "TXMap-doton-BartonCreek.PNG",
+     300,
+     284
+    ],
+    [
+     "Zilker Park",
+     "Historic urban park in Austin, Texas",
+     30.26361111,
+     -97.77666667,
+     "Austin-skyline.jpg",
+     1920,
+     1080
+    ],
+    [
+     "Barton Springs",
+     "United States historic place",
+     30.2639,
+     -97.77,
+     "BartonSprings_MainSpring.jpg",
+     1024,
+     665
+    ],
+    [
+     "Treaty Oak (Austin, Texas)",
+     "Historic tree in Austin, Texas",
+     30.2713,
+     -97.7555,
+     "Treaty_oak_austin_2015.jpg",
+     1188,
+     1782
+    ],
+    [
+     "Barton Springs Pool",
+     "Outdoor swimming pool in the United States",
+     30.2639,
+     -97.77,
+     "360_Barton_Springs_5July08_(9).JPG",
+     1600,
+     1200
+    ],
+    [
+     "Austin City Limits Music Festival",
+     "Annual music festival held in Austin, Texas",
+     30.26756,
+     -97.76716111,
+     "Austin_City_Limits_Music_Festival_2012.jpg",
+     1250,
+     772
+    ],
+    [
+     "Barton Creek",
+     "River in the United States of America",
+     30.26707222,
+     -97.76128611,
+     "BartonSprings_1900_USGS.jpg",
+     800,
+     549
+    ],
+    [
+     "Zilker Botanical Garden",
+     "Botanical garden in Austin, Texas, U.S.",
+     30.2689,
+     -97.7714,
+     "ZilkerBotanicalGarden-Entrance.JPG",
+     1915,
+     2430
+    ],
+    [
+     "Stephen F. Austin High School (Austin, Texas)",
+     "Public high school in Austin, Texas",
+     30.27388889,
+     -97.76638889,
+     "AustinHighSchoolAustin.JPG",
+     2272,
+     1704
+    ],
+    [
+     "Umlauf Sculpture Garden and Museum",
+     "Art museum in Austin, Texas",
+     30.26333333,
+     -97.76583333,
+     "Umlauf_garden1_2006.jpg",
+     991,
+     742
+    ],
+    [
+     "Austin station (Texas)",
+     "Train station just west of downtown Austin, Texas",
+     30.26972222,
+     -97.75694444,
+     "Austin_Amtrak_Station.jpg",
+     5990,
+     3993
+    ],
+    [
+     "Lamar Boulevard Bridge",
+     "Historic bridge in Austin, Texas",
+     30.26555556,
+     -97.75638889,
+     "Lamar_Boulevard_Bridge_20160904200840.jpg",
+     6000,
+     4000
+    ]
+   ]
+  }
+ ]
+}

@@ -32,6 +32,28 @@ async function scrollThrough(page, step = 650) {
   const h = await page.evaluate(() => document.documentElement.scrollHeight);
   for (let y = 0; y < h + step; y += step) { await page.evaluate(y => window.scrollTo(0, y), y); await sleep(160); }
 }
+/* the page must never scroll sideways on a phone (it did on Home at 360 px) */
+async function sidewaysOverflow(page) {
+  const bad = [];
+  for (const w of [320, 360, 412]) {
+    await page.setViewport({ width: w, height: 800, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    await sleep(350);
+    const r = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
+    if (r.sw > r.cw + 1) bad.push(w + 'px: ' + r.sw + ' > ' + r.cw);
+  }
+  await page.setViewport({ width: 412, height: 915, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  return bad;
+}
+/* swipe the top-rated strip card by card, the way a person looks through it */
+async function swipeStrip(page, until = 'photo|map') {
+  await page.$eval('#highlights', h => h.scrollIntoView({ block: 'center' }));
+  const n = await page.$$eval('.hl-card', c => c.length);
+  for (let i = 0; i < n; i++) {
+    await page.evaluate(i => document.querySelectorAll('.hl-card')[i].scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'instant' }), i);
+    await waitFor(page, i => !!document.querySelectorAll('.hl-media')[i].dataset.filled, 3000, i);
+  }
+  return waitFor(page, re => [...document.querySelectorAll('.hl-media')].every(b => new RegExp('^(' + re + ')$').test(b.dataset.kind || '')), 12000, until);
+}
 async function cardsReady(page, n = 30) { return waitFor(page, n => document.querySelectorAll('.trail-card').length >= n, 20000, n); }
 async function allMediaFilled(page, timeout = 15000) {
   await scrollThrough(page, 500);
@@ -48,6 +70,9 @@ const cardMedia = page => page.$$eval('.trail-card', cards => cards.map(c => {
     pin: (() => { const p = box.querySelector('.map-thumb__pin'); if (!p) return null; const pr = p.getBoundingClientRect(); return pr.left >= r.left - 2 && pr.right <= r.right + 2 && pr.top >= r.top - 2 && pr.bottom <= r.bottom + 2; })()
   };
 }));
+/* junk that really comes back from Commons around Zermatt and Austin */
+const JUNK_RE = /Wanderwegweiser|Hotel_vehicle|Bahnhofstrasse|police_vehicle|Cor_des_alpes|Erinus|Euphydryas|Flowers?_in_Zermatt|Hiking_sign|Swisstopo|Malacosoma|Euphorbia|Lotus_alpinus|Alyssum|Plant_in_Zermatt|Jakob_und_Linda|station|White_stripe|Zilker_elementary|Risk_Legacy|Argemone|Gaillardia|Monarda|Dungeon|Number_1|Voting|Child_with|Candied|Neighborhood|Texas_Aerial|Pseudouroctonus|View_of_Earth|F_18|Bergstation|Skilift|Pistenfahrzeug|recycling|Ristorante|Bar_Igloo|Bar_Baitta|Downtown|Nanteuil|Leroux|frontispiece|Telescope|railway|Museum|Funivia|Hotel|School|Amtrak|TXMap/i;
+const photoName = src => decodeURIComponent(String(src).split('?')[0].split('/').pop()).replace(/^\d+px-/, '');
 const lastBot = page => page.evaluate(() => { const m = [...document.querySelectorAll('#assistantLog .msg--bot:not(.msg--typing)')]; return m.length ? m[m.length - 1].textContent : ''; });
 async function ask(page, text, expect) {
   const before = await page.$$eval('#assistantLog .msg--bot:not(.msg--typing)', m => m.length);
@@ -79,6 +104,8 @@ for (const name of ['index.html', 'start.html', 'social.html']) {
     await page.evaluate(() => window.scrollTo(0, 0));
     T.check('no JavaScript errors', errors.length === 0, errors.join(' | '));
     T.check('no missing local files', failedLocal.length === 0, failedLocal.join(' | '));
+    const side = await sidewaysOverflow(page);
+    T.check('fits small phones — never scrolls sideways (320 / 360 / 412 px)', side.length === 0, side.join(', '));
     const broken = await brokenImages(page);
     T.check('no broken images', broken.length === 0, broken.join(', '));
     const imgs = await page.$$eval('img', els => els.filter(i => i.offsetParent !== null).map(i => ({ src: i.getAttribute('src'), ok: i.complete && i.naturalWidth > 0 })));
@@ -163,23 +190,29 @@ await T.section('Trails page (phone)', async () => {
   const cervin = cards.find(c => c.name === 'Tour du Cervin');
   T.check('multi-day trek shows days (Tour du Cervin)', cervin && /days/.test(cervin.meta), cervin && cervin.meta);
 
-  /* photos */
+  /* photos — the mocks replay REAL Commons/Wikipedia results, and Google
+     sends no photos (exactly what the real API does for this key) */
   const photos = cards.filter(c => c.kind === 'photo'), maps = cards.filter(c => c.kind === 'map');
   console.log('    (' + photos.length + ' photos, ' + maps.length + ' trail-area maps)');
   T.check('every card has an image (photo or trail map)', photos.length + maps.length === cards.length);
+  T.check('most cards show a real photo although Google sends none (≥ 60%)', photos.length >= 0.6 * cards.length, photos.length + ' of ' + cards.length);
   T.check('no stock fallback pictures on trail cards', !cards.some(c => /assets\/fallback-/.test(c.src)));
   const srcs = photos.map(c => c.src);
   T.check('no photo repeated on two cards', new Set(srcs).size === srcs.length, srcs.length - new Set(srcs).size + ' duplicates');
-  T.check('Commons junk filtered (board games, maps, voting machines, buildings, dogs, DSC_…)', !srcs.some(s => /Risk_Legacy|Dungeon|Voting|Swisstopo|City_Hall|dog|DSC/i.test(s)));
+  const junk = srcs.filter(s => JUNK_RE.test(photoName(s)));
+  T.check('real Commons junk never shown (signposts, vehicles, streets, plants, insects, people, stations…)', junk.length === 0, junk.map(photoName).join(', '));
   T.check('all photos actually loaded', photos.every(c => c.loaded), photos.filter(c => !c.loaded).map(c => c.src).join(', '));
-  const commons = photos.filter(c => /wikimedia/.test(c.src));
-  T.check('Wikimedia photos credited (author + licence, HTML stripped)', commons.length > 0 && commons.every(c => /CC BY-SA 2\.0/.test(c.credit) && /Björn/.test(c.credit) && !/</.test(c.credit)));
-  const goog = photos.filter(c => /googleapis/.test(c.src));
-  T.check('Google photos credited', goog.length > 0 && goog.every(c => /Google/.test(c.credit)));
-  const gPlaces = goog.map(c => (c.src.match(/places\/([^/]+)\//) || [])[1]);
-  T.check('each Google place used for one trail only', new Set(gPlaces).size === gPlaces.length, gPlaces.join(','));
-  const swissTop = cards.find(c => c.name === 'Swiss Top Walk');
-  T.check('“Swiss Top Walk” no longer borrows the “5 Lakes Walk” photo', swissTop && !/five_lakes/.test(swissTop.src), swissTop && swissTop.src);
+  T.check('only standard Wikimedia thumbnail widths requested (others are refused)', router.log.badThumbs.length === 0, router.log.badThumbs.slice(0, 3).join(', '));
+  T.check('photos are 960 px thumbnails, never multi-MB originals', srcs.every(s => /\/960px-|thumbnail_unscaled/.test(s)), srcs.filter(s => !/\/960px-|thumbnail_unscaled/.test(s)).join(', '));
+  const commons = photos.filter(c => /wikimedia/.test(c.src) && !/Wikipedia ·/.test(c.credit));
+  T.check('Commons photos credited with author + licence (HTML stripped)', commons.length > 0 && commons.every(c => /^📷 .+ · (CC BY|Public domain)/.test(c.credit) && !/</.test(c.credit)), JSON.stringify(commons.slice(0, 3).map(c => c.credit)));
+  T.check('no Google photo requests when Google sends no photos', !router.log.external.some(u => /places\.googleapis\.com\/v1\/places\/[^:]+\/media/.test(u)));
+  const hornli = cards.find(c => c.name === 'Hörnliweg');
+  T.check('Hörnliweg card shows a photo of the Hörnliweg itself', hornli && /Hörnliweg/.test(photoName(hornli.src)), hornli && photoName(hornli.src));
+  const glacier = cards.find(c => /^Matterhorn glacier trail$/i.test(c.name));
+  T.check('Matterhorn glacier trail card shows a “Matterhorn Glacier Trail” photo', glacier && /Matterhorn_Glacier_Trail/i.test(photoName(glacier.src)), glacier && photoName(glacier.src));
+  T.check('Wikimedia lookups stay light (≤ 2 small requests per card, 1 per area)', router.log.wikimediaApi.length <= 2 * (cards.length + 8) + 2, router.log.wikimediaApi.length + ' calls for ' + cards.length + ' cards + 8 places');
+  T.check('Swisstopo TIFF scans are never even looked up', !router.log.wikimediaApi.some(u => /pageids=/.test(u) && /Swisstopo/.test(decodeURIComponent(u))));
   T.check('phone layout: full-width 16:9 photos (not narrow strips)', cards.every(c => c.w >= 330 && Math.abs(c.h / c.w - 9 / 16) < 0.04), JSON.stringify(cards.slice(0, 3).map(c => [Math.round(c.w), Math.round(c.h)])));
   T.check('map thumbnails: tiles loaded and start pin inside the frame', maps.every(c => c.tiles > 0 && c.tilesOk && c.pin));
   T.check('no broken images anywhere', (await brokenImages(page)).length === 0, (await brokenImages(page)).join(', '));
@@ -187,8 +220,24 @@ await T.section('Trails page (phone)', async () => {
   /* map, weather, highlights */
   T.check('backup map (Leaflet) shown when Google Maps JS is unavailable', await page.$eval('#leafletMap', m => m.classList.contains('leaflet-container') && !m.hidden && m.querySelectorAll('img.leaflet-tile-loaded').length > 0));
   T.check('5-day weather strip', (await page.$$('.weather-day')).length === 5);
-  const hl = await page.$$eval('.hl-card', c => c.map(x => ({ ok: [...x.querySelectorAll('img')].every(i => i.complete && i.naturalWidth > 0) && x.querySelectorAll('img').length > 0, credit: (x.querySelector('.photo-credit') || {}).textContent || '' })));
-  T.check('Google highlights: 8 cards, photos loaded + credited', hl.length === 8 && hl.every(h => h.ok && /Google/.test(h.credit)), JSON.stringify(hl.slice(0, 2)));
+  /* the strip loads lazily — places off to the right wait until swiped into view */
+  await page.$eval('#highlights', h => h.scrollIntoView({ block: 'center' }));
+  await sleep(1500);
+  const filledBefore = await page.$$eval('.hl-media', b => b.filter(x => x.dataset.filled === '1').length);
+  T.check('top-rated strip loads lazily (places swiped out of view aren’t fetched yet)', filledBefore >= 1 && filledBefore < 8, filledBefore + ' of 8 filled before swiping');
+  await swipeStrip(page);
+  await sleep(600);
+  const hl = await page.$$eval('.hl-card', c => c.map(x => {
+    const m = x.querySelector('.hl-media'), img = m.querySelector('.trail-photo');
+    return { kind: m.dataset.kind, ok: [...x.querySelectorAll('img')].every(i => i.complete && i.naturalWidth > 0) && x.querySelectorAll('img').length > 0,
+      credit: (x.querySelector('.photo-credit') || {}).textContent || '', nestedLink: !!x.querySelector('a.photo-credit'), src: img ? img.getAttribute('src') : '' };
+  }));
+  const hlPhotos = hl.filter(h => h.kind === 'photo');
+  T.check('top-rated strip: 8 places, each with an image that loaded', hl.length === 8 && hl.every(h => h.ok), JSON.stringify(hl.filter(h => !h.ok)));
+  T.check('…real photos for most of them although Google sends none (≥ 5 of 8)', hlPhotos.length >= 5, hl.map(h => h.kind).join(','));
+  T.check('…credited, no junk, no link nested inside the card link', hlPhotos.every(h => /📷/.test(h.credit) && !JUNK_RE.test(photoName(h.src))) && !hl.some(h => h.nestedLink), JSON.stringify(hlPhotos.slice(0, 2)));
+  const allSrcs = srcs.concat(hlPhotos.map(h => h.src));
+  T.check('no photo appears twice on the page (cards + strip)', new Set(allSrcs).size === allSrcs.length);
   T.check('TrailSplits used for trails/weather', router.log.apiCalls.some(c => c.path.startsWith('/trails/v1/bbox')) && router.log.external.some(u => /trailsplits\.com\/api\/weather/.test(u)));
 
   /* details sheet */
@@ -210,6 +259,16 @@ await T.section('Trails page (phone)', async () => {
   T.check('details: ✕ floats over the photo', d.closeOnTop);
   T.check('details: elevation profile drawn', d.chart && d.elevShown);
   T.check('details: climb shown', /512 m/.test(d.facts), d.facts);
+  await waitFor(page, () => /Trailhead/.test((document.querySelector('#dirNote') || {}).textContent || ''), 5000);
+  const dir = await page.evaluate(() => ({ note: document.querySelector('#dirNote').textContent, href: document.querySelector('#dirRow a.btn-primary').href }));
+  const rel = await page.evaluate(async id => { const t = [...document.querySelectorAll('.trail-card')].find(c => c.querySelector('.trail-card__name').textContent === id); return t ? t.dataset.id : null; }, first.name);
+  const relId = rel && rel.replace(/^\D+/, '');
+  const geo = await page.evaluate(async id => (await (await fetch('https://api.trailsplits.com/trails/v1/relation/' + id)).json()).geometry.coordinates, relId);
+  const ends = [geo[0], geo[geo.length - 1]].map(([lon, lat]) => (+lat.toFixed(6)) + ',' + (+lon.toFixed(6)));
+  const dest = (dir.href.match(/destination=([^&]+)/) || dir.href.match(/daddr=([^&]+)/) || [])[1];
+  T.check('details: Directions go to the trailhead (a route end), not the middle of the area', /Trailhead/.test(dir.note) && ends.includes(decodeURIComponent(dest || '')), dir.note + ' → ' + dest + ' vs ends ' + ends.join(' | '));
+  const cardDir = await page.evaluate(n => { const c = [...document.querySelectorAll('.trail-card')].find(x => x.querySelector('.trail-card__name').textContent === n); return c && c.querySelector('a[data-dir]').href; }, first.name);
+  T.check('…and the card’s Directions button follows', cardDir === dir.href, cardDir);
   await shot(page, 'details');
   await page.click('#modalClose');
   T.check('✕ closes details', await waitFor(page, () => !document.querySelector('#modalBackdrop').classList.contains('is-open'), 3000));
@@ -243,6 +302,8 @@ await T.section('Trails page (phone)', async () => {
   await page.type('#searchInput', 'zzzz');
   await page.keyboard.press('Enter');
   T.check('unknown place → friendly message', await waitFor(page, () => /Couldn.t find/.test((document.querySelector('.toast') || {}).textContent || ''), 8000));
+  const sideT = await sidewaysOverflow(page);
+  T.check('Trails fits small phones — never scrolls sideways (320 / 360 / 412 px)', sideT.length === 0, sideT.join(', '));
   T.check('no JavaScript errors on Trails', errors.length === 0, errors.join(' | '));
   T.check('no missing local files on Trails', failedLocal.length === 0, failedLocal.join(' | '));
   await context.close();
@@ -256,11 +317,85 @@ await T.section('Trails page — when photo services fail', async () => {
   await sleep(1500);
   const cards = await cardMedia(page);
   T.check('…a map of the trail’s own area (tiles + start pin)', cards.every(c => c.kind === 'map' && c.tiles > 0 && c.tilesOk && c.pin), JSON.stringify(cards.filter(c => c.kind !== 'map').map(c => c.name)));
+  await swipeStrip(page, 'map');
   const hl = await page.$$eval('.hl-card .hl-media', b => b.map(x => x.dataset.kind));
   T.check('highlights fall back to maps too', hl.length > 0 && hl.every(k => k === 'map'), hl.join(','));
   T.check('no broken images', (await brokenImages(page)).length === 0, (await brokenImages(page)).join(', '));
   T.check('no JavaScript errors', errors.length === 0, errors.join(' | '));
   await shot(page, 'maps-fallback');
+  await context.close();
+});
+
+await T.section('Trails page — Wikimedia refuses every image (rate limit)', async () => {
+  const { page, context, errors } = await openPage(browser, BASE + '/trails.html', opts({ wikimediaImagesFail: true }));
+  await cardsReady(page, 40);
+  await gotIt(page);
+  T.check('cards still all get an image', await allMediaFilled(page, 25000));
+  await sleep(1500);
+  const cards = await cardMedia(page);
+  T.check('…after trying other photos, the trail-area map', cards.every(c => c.kind === 'map' && c.tilesOk), JSON.stringify(cards.filter(c => c.kind !== 'map').map(c => c.name + ':' + c.kind)));
+  T.check('no broken images', (await brokenImages(page)).length === 0, (await brokenImages(page)).join(', '));
+  T.check('no JavaScript errors', errors.length === 0, errors.join(' | '));
+  await context.close();
+});
+
+await T.section('Trails page — Wikimedia “too busy” at first', async () => {
+  const { page, context, errors, router } = await openPage(browser, BASE + '/trails.html', opts({ wikimediaBusyFirst: true }));
+  await cardsReady(page, 40);
+  await gotIt(page);
+  await allMediaFilled(page, 25000);
+  await sleep(3000);
+  const cards = await cardMedia(page);
+  const photos = cards.filter(c => c.kind === 'photo');
+  T.check('the “too busy” answer is retried, so photos still arrive', photos.length >= 12, photos.length + ' photos');
+  T.check('…and was not cached as “no photos”', await page.evaluate(() => { const c = JSON.parse(localStorage.getItem('calledit_photos_v3') || '{}'); return Object.keys(c).filter(k => k.startsWith('c:')).some(k => c[k].c && c[k].c.length > 0); }));
+  T.check('no broken images, no JavaScript errors', (await brokenImages(page)).length === 0 && errors.length === 0, errors.join(' | '));
+  await context.close();
+});
+
+await T.section('Trails page — when Google does send photos', async () => {
+  const { page, context, errors } = await openPage(browser, BASE + '/trails.html', opts({ googlePhotos: true }));
+  await cardsReady(page, 40);
+  await gotIt(page);
+  await allMediaFilled(page);
+  await sleep(1000);
+  const cards = await cardMedia(page);
+  const goog = cards.filter(c => c.kind === 'photo' && /googleapis/.test(c.src));
+  T.check('Google photos used for trails Google knows, credited with the author', goog.length >= 3 && goog.every(c => /^Photo: Lena K\. · Google Maps$/.test(c.credit) && c.loaded), goog.length + ' ' + JSON.stringify(goog.slice(0, 2).map(c => c.credit)));
+  const gPlaces = goog.map(c => (c.src.match(/places\/([^/]+)\//) || [])[1]);
+  T.check('each Google place used for one trail only', new Set(gPlaces).size === gPlaces.length, gPlaces.join(','));
+  const swissTop = cards.find(c => c.name === 'Swiss Top Walk');
+  T.check('“Swiss Top Walk” doesn’t borrow the “5 Lakes Walk” photo', swissTop && !/five_lakes/.test(swissTop.src), swissTop && swissTop.src);
+  await swipeStrip(page);
+  const hl = await page.$$eval('.hl-media', b => b.map(x => (x.querySelector('.trail-photo') || {}).src || ''));
+  T.check('top-rated strip uses Google’s photos', hl.length === 8 && hl.every(s => /googleapis/.test(s)), hl.filter(s => !/googleapis/.test(s)).join(', '));
+  T.check('no JavaScript errors', errors.length === 0, errors.join(' | '));
+  await context.close();
+});
+
+await T.section('Trails page — Austin (few signed routes, Google places as trails)', async () => {
+  const { page, context, errors, router } = await openPage(browser, BASE + '/trails.html', opts({ scenario: 'austin' }));
+  await waitFor(page, () => document.querySelectorAll('.trail-card').length > 0, 20000);
+  await gotIt(page);
+  await page.$eval('#searchInput', e => { e.value = ''; });
+  await page.type('#searchInput', 'Austin, Texas');
+  await page.keyboard.press('Enter');
+  await waitFor(page, () => /Austin/.test(document.querySelector('#statusLine').textContent) && [...document.querySelectorAll('.trail-card__name')].some(n => /Barton Creek/.test(n.textContent)), 15000);
+  await allMediaFilled(page, 20000);
+  await sleep(1200);
+  const cards = await cardMedia(page);
+  const photos = cards.filter(c => c.kind === 'photo');
+  console.log('    (' + photos.length + ' photos, ' + (cards.length - photos.length) + ' maps: ' + cards.map(c => c.name + '=' + c.kind).join(', ') + ')');
+  const barton = cards.find(c => /Barton Creek/.test(c.name));
+  T.check('Barton Creek Greenbelt card shows a real Barton Creek Greenbelt photo', barton && /Barton_Creek_Greenbelt/.test(photoName(barton.src)) && barton.loaded, barton && photoName(barton.src));
+  const lady = cards.find(c => /Lady Bird/.test(c.name));
+  T.check('Lady Bird Lake card gets a real photo too', lady && lady.kind === 'photo' && lady.loaded, lady && (lady.kind + ' ' + photoName(lady.src)));
+  const junk = photos.filter(c => JUNK_RE.test(photoName(c.src)));
+  T.check('Austin junk never shown (school, board game, wildflowers, scorpion, paintings, neighbourhoods…)', junk.length === 0, junk.map(c => photoName(c.src)).join(', '));
+  T.check('places without nearby photos get their own map, nothing broken', cards.every(c => c.kind === 'photo' || (c.kind === 'map' && c.tilesOk)) && (await brokenImages(page)).length === 0);
+  T.check('only standard Wikimedia widths requested', router.log.badThumbs.length === 0, router.log.badThumbs.join(', '));
+  T.check('no JavaScript errors', errors.length === 0, errors.join(' | '));
+  await shot(page, 'austin');
   await context.close();
 });
 
@@ -416,7 +551,9 @@ await T.section('Back gesture walks history (never exits from inner pages)', asy
   await waitFor(page, () => document.querySelector('#modalBackdrop').classList.contains('is-open'), 3000);
   await page.evaluate(() => history.back());
   T.check('1st back: closes the open sheet', await waitFor(page, () => !document.querySelector('#modalBackdrop').classList.contains('is-open'), 3000) && /trails\.html/.test(page.url()));
-  await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded' }), page.evaluate(() => history.back())]);
+  /* fire back() AFTER evaluate returns — otherwise the navigation can destroy the
+     page context mid-call (a test race seen once in the APK run, not an app bug) */
+  await Promise.all([page.waitForNavigation({ waitUntil: 'domcontentloaded' }), page.evaluate(() => { setTimeout(() => history.back(), 0); })]);
   T.check('2nd back: returns to Home', /index\.html/.test(page.url()), page.url());
   T.check('no JavaScript errors', errors.length === 0, errors.join(' | '));
   await context.close();

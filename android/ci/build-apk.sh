@@ -10,6 +10,10 @@
 #   D8          d8 jar (or 'd8' script via D8_CMD)
 #   ECJ_JAR     Eclipse compiler jar (only if 'javac' is not on PATH)
 #   APKSIGNER   apksigner jar (runs with java) or apksigner binary
+#   PREBUILT_DEX optional: a classes.dex — or an APK to take it from — built
+#               from the SAME Java sources. Java is still compiled (so source
+#               errors still fail the build) but the d8 step is skipped. For
+#               web-only releases when no JVM d8 is at hand.
 #
 # Output: android/dist/CalledIt-<version>.apk  (signed with a debug keystore)
 # ============================================================
@@ -22,8 +26,8 @@ DIST="$AND/dist"
 JAVA="${JAVA:-java}"
 AAPT2="${AAPT2:-${ANDROID_HOME:-}/build-tools/34.0.0/aapt2}"
 ANDROID_JAR="${ANDROID_JAR:-${ANDROID_HOME:-}/platforms/android-34/android.jar}"
-VERSION_NAME="${VERSION_NAME:-1.2.1}"
-VERSION_CODE="${VERSION_CODE:-4}"
+VERSION_NAME="${VERSION_NAME:-1.2.2}"
+VERSION_CODE="${VERSION_CODE:-5}"
 
 mkdir -p "$BUILD" "$DIST"
 rm -rf "$BUILD"/* 
@@ -43,14 +47,21 @@ if command -v javac >/dev/null 2>&1; then
   javac -source 1.8 -target 1.8 -bootclasspath "$ANDROID_JAR" -classpath "$ANDROID_JAR" \
         -d "$BUILD/classes" $SOURCES
 else
-  "$JAVA" -jar "$ECJ_JAR" -source 1.7 -target 1.7 -nowarn \
+  "$JAVA" -jar "$ECJ_JAR" -source 1.8 -target 1.8 -nowarn \
         -bootclasspath "$ANDROID_JAR" -classpath "$ANDROID_JAR" \
         -d "$BUILD/classes" $SOURCES
 fi
 
 echo "== 3/7 dex (d8) =="
 mkdir -p "$BUILD/dex"
-if [ -n "${D8_CMD:-}" ]; then
+if [ -n "${PREBUILT_DEX:-}" ]; then
+  case "$PREBUILT_DEX" in
+    *.apk) unzip -p "$PREBUILT_DEX" classes.dex > "$BUILD/dex/classes.dex" ;;
+    *)     cp "$PREBUILT_DEX" "$BUILD/dex/classes.dex" ;;
+  esac
+  [ -s "$BUILD/dex/classes.dex" ] || { echo "PREBUILT_DEX has no classes.dex" >&2; exit 1; }
+  echo "   (reusing classes.dex from $PREBUILT_DEX — Java sources must be unchanged)"
+elif [ -n "${D8_CMD:-}" ]; then
   $D8_CMD --min-api 24 --output "$BUILD/dex" "$BUILD/classes"
 elif command -v d8 >/dev/null 2>&1; then
   d8 --min-api 24 --output "$BUILD/dex" "$BUILD/classes"

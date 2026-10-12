@@ -453,81 +453,46 @@
   }
 
   /* ============================================================
-     TRAIL PHOTOS — every card shows an image of THAT trail:
-       1. its Google Maps photo (when Google knows the trail), else
-       2. a real, freely-licensed photo taken near the trail start
-          (Wikimedia Commons geosearch — filtered hard so board games,
-          maps, signs or buildings never show up; credited; never the
-          same photo on two cards), else
-       3. a small map of the trail’s own area with its start pinned.
-     No more repeating stock pictures. Lookups are lazy (only cards you
-     scroll to) and cached on the device for 30 days.
+     TRAIL PHOTOS — every card shows a real picture of THAT trail’s area:
+       1. its Google Maps photo, when Google returns one — but Google gives
+          the configured key no photos at all (checked 2026-10-12: even the
+          Eiffel Tower comes back without `photos`), so normally skipped;
+       2. a free, credited photo taken around the trail — Wikimedia Commons
+          geosearch over the trail’s own area, scored by js/photos.js
+          (scenery words, the trail’s name and the town count; signs,
+          vehicles, streets, buildings, plants, insects, portraits and
+          artworks never show) — calibrated on real Commons results;
+       3. the lead photo of a nearby lake / peak / park on Wikipedia;
+       4. a small map of the trail’s own area, centre pinned.
+     Never the same photo on two cards. Lazy (only cards you scroll to),
+     cached on the device for 30 days.
      ============================================================ */
-  var PHOTO_CACHE_KEY = 'calledit_photos_v2';
+  var P = window.CalledItPhotos || null;          /* js/photos.js — if it didn't load, cards show maps */
+  var PHOTO_CACHE_KEY = 'calledit_photos_v3';
   var PHOTO_TTL = 30 * 864e5;
+  try { localStorage.removeItem('calledit_photos_v2'); } catch (e) { }   /* v2 remembered “no photo” for most trails */
   var photoCache = (function () {
     try { return JSON.parse(localStorage.getItem(PHOTO_CACHE_KEY) || '{}') || {}; } catch (e) { return {}; }
   })();
   var photoCacheTimer = null;
+  function newestFirst(a, b) { return (photoCache[b].at || 0) - (photoCache[a].at || 0); }
   function savePhotoCache() {
     clearTimeout(photoCacheTimer);
     photoCacheTimer = setTimeout(function () {
       var keys = Object.keys(photoCache);
-      if (keys.length > 400) {                      /* keep the newest 400 */
-        keys.sort(function (a, b) { return (photoCache[b].at || 0) - (photoCache[a].at || 0); })
-          .slice(400).forEach(function (k) { delete photoCache[k]; });
+      if (keys.length > 300) keys.sort(newestFirst).slice(300).forEach(function (k) { delete photoCache[k]; });
+      try { localStorage.setItem(PHOTO_CACHE_KEY, JSON.stringify(photoCache)); }
+      catch (e) {                                   /* storage full — keep the newest half */
+        keys = Object.keys(photoCache).sort(newestFirst);
+        keys.slice(Math.ceil(keys.length / 2)).forEach(function (k) { delete photoCache[k]; });
+        try { localStorage.setItem(PHOTO_CACHE_KEY, JSON.stringify(photoCache)); } catch (e2) { }
       }
-      try { localStorage.setItem(PHOTO_CACHE_KEY, JSON.stringify(photoCache)); } catch (e) { }
     }, 400);
   }
-  function photoKey(t) { return t.lat.toFixed(3) + ',' + t.lon.toFixed(3); }
 
   function plainWords(s) {
-    return String(s || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/\.(jpe?g|png|webp|tiff?|gif)$/, '').split(/[^a-z0-9]+/).filter(Boolean);
-  }
-  var GOOD = ('lake lakes lac lago laghi see seen trail trails path paths sentier sentiero sendero hike hiking wanderweg mountain mountains ' +
-    'peak peaks piz mont monte glacier gletscher valley tal val vallee view views panorama aussicht creek river fluss springs spring falls ' +
-    'waterfall wasserfall cascade forest wald woods park preserve canyon gorge schlucht ridge alp alpe alpine pass summit gipfel hill hills ' +
-    'trailhead greenbelt nature landscape meadow wiese sunset sunrise cliff cliffs overlook bluff dunes prairie wetland marsh bridge ' +
-    'hangebrucke hut hutte cabane rifugio refuge horn berg spitze bach stream pond reservoir lagoon coast beach bay island wilderness ' +
-    'matterhorn jungfrau eiger dolomites rockies sierra appalachian').split(' ');
-  var SUFFIX = ['tal', 'horn', 'berg', 'see', 'gletscher', 'weg', 'wald', 'bach', 'spitze', 'brucke', 'hutte', 'alp', 'alpe', 'pass', 'joch', 'grat'];
-  var BAD = ('map maps karte plan plans logo diagram chart board game games dungeon voting machine poster document screenshot scan flag ' +
-    'coat arms wappen sign signs signpost ticket menu portrait selfie interior inside microscope specimen insect beetle moth spider ' +
-    'fungus plaque memorial grave cemetery tombstone church chapel kirche cathedral hotel restaurant bar cafe shop store building ' +
-    'house street car cars bus tram train trains railway railroad station bahnhof airport aircraft airplane helicopter construction ' +
-    'crane text book page cover newspaper stamp coin banknote advertisement graffiti crowd concert festival parade protest meeting ' +
-    'conference election number sticker label bottle food dish meal logo icon svg drawing sketch painting museum exhibit statue sculpture ' +
-    'swisstopo survey aerial orthophoto satellite hall capitol tower office school university campus hospital stadium mall garage ' +
-    'apartment apartments room lobby kitchen people wedding dog cat portrait headshot').split(' ');
-  var STOP = ['the', 'and', 'trail', 'weg', 'route', 'tour', 'stage', 'tappa', 'via', 'chemin', 'des', 'del', 'della', 'von', 'zum', 'zur'];
-
-  function scoreCommons(info, title, t) {
-    if (!info || !/^image\/(jpeg|webp)$/.test(info.mime || '')) return -99;
-    var words = plainWords(title.replace(/^File:/i, ''));
-    var score = 0, good = 0;
-    for (var i = 0; i < words.length; i++) {
-      var w = words[i];
-      if (BAD.indexOf(w) !== -1) score -= 10;
-      if (GOOD.indexOf(w) !== -1) good++;
-      else for (var j = 0; j < SUFFIX.length; j++) {
-        if (w.length >= SUFFIX[j].length + 3 && w.slice(-SUFFIX[j].length) === SUFFIX[j]) { good++; break; }
-      }
-    }
-    score += Math.min(2, good) * 3;
-    /* words from the trail’s own name or the area name */
-    var name = plainWords(t.name + ' ' + (t.nameEn || '')).filter(function (w) { return w.length >= 4 && STOP.indexOf(w) === -1; });
-    var area = plainWords(state.location.label).filter(function (w) { return w.length >= 4; });
-    var nameHit = name.some(function (n) { return words.some(function (w) { return w === n || (n.length >= 5 && w.indexOf(n) === 0) || (w.length >= 5 && n.indexOf(w) === 0); }); });
-    if (!good && !nameHit) return -5;            /* must show nature/trail — or be named after this trail */
-    if (nameHit) score += 3;
-    if (area.some(function (a) { return words.indexOf(a) !== -1; })) score += 2;
-    var wpx = info.width || 0, hpx = info.height || 0;
-    if (wpx >= hpx * 1.2) score += 1;            /* landscape suits the cards */
-    if (hpx > wpx * 1.1) score -= 2;             /* portrait crops badly */
-    if (wpx && wpx < 900) score -= 2;
-    return score;
+    return String(s || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/ß/g, 'ss')
+      .split(/[^a-z0-9]+/).filter(Boolean);
   }
 
   function stripTags(html) {
@@ -536,60 +501,155 @@
     return (d.textContent || '').replace(/\s+/g, ' ').trim();
   }
 
-  /* concurrency-limited queue for photo lookups (be gentle with Commons) */
+  /* Search the trail’s own area. (TrailSplits’ point for a route is the
+     middle of its bounding box, so a radius of half the diagonal covers it.) */
+  function trailRadius(t) {
+    var bb = t.bbox;
+    if (bb && bb.length === 4 && bb[2] > bb[0] && bb[3] > bb[1]) {
+      return Math.round(Math.max(2000, Math.min(5000, C.haversineM(bb[1], bb[0], bb[3], bb[2]) / 2)));
+    }
+    return 2000;
+  }
+  function photoKey(t) { return 'c:' + t.id + '@' + t.lat.toFixed(3) + ',' + t.lon.toFixed(3); }
+
+  /* concurrency-limited queue for photo lookups (be gentle with Wikimedia) */
   var photoQueue = [], photoActive = 0;
   function enqueuePhoto(job) {
     photoQueue.push(job);
     pumpPhotos();
   }
   function pumpPhotos() {
-    while (photoActive < 2 && photoQueue.length) {
+    while (photoActive < 3 && photoQueue.length) {
       var job = photoQueue.shift();
       photoActive++;
       Promise.resolve().then(job).catch(function () { }).then(function () { photoActive--; pumpPhotos(); });
     }
   }
+  var photoPending = {};
+  function lookupOnce(key, run) {                   /* one request per key, however many boxes ask */
+    if (photoPending[key]) return photoPending[key];
+    var p = photoPending[key] = new Promise(function (resolve) {
+      enqueuePhoto(function () { return run().then(resolve, function () { resolve([]); }); });
+    });
+    p.then(function () { delete photoPending[key]; });
+    return p;
+  }
 
-  var commonsPending = {};
+  /* Wikimedia answers some requests with {"error": …} and HTTP 200 — e.g.
+     “cirrussearch-too-busy-error: Search is currently too busy”. Treat that
+     as a failure (retried once, never cached as “no photos”). */
+  function wikimediaJSON(url) {
+    function get() {
+      return fetchJSON(url, null, 10000).then(function (j) {
+        if (!j || j.error) throw new Error((j && j.error && j.error.code) || 'empty response');
+        return j;
+      });
+    }
+    return get().catch(function () {
+      return new Promise(function (r) { setTimeout(r, 1500); }).then(get);
+    });
+  }
+
+  /* Commons photos taken around trail t — best first. Two light requests:
+       1. the 100 nearest files, titles only — a long list matters: Swisstopo
+          has put thousands of geotagged aerial-survey TIFFs on Commons, and
+          around St. Niklaus 23 of the 24 nearest files are those;
+       2. size, type, author, licence and a 960 px thumbnail for the 20 most
+          promising JPEGs only. */
+  var COMMONS_API = 'https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*';
   function commonsCandidates(t) {
     var key = photoKey(t);
     var hit = photoCache[key];
     if (hit && Date.now() - hit.at < PHOTO_TTL) return Promise.resolve(hit.c || []);
-    if (commonsPending[key]) return commonsPending[key];
-    var url = 'https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*' +
-      '&generator=geosearch&ggscoord=' + t.lat.toFixed(5) + '%7C' + t.lon.toFixed(5) + '&ggsradius=1500&ggsnamespace=6&ggslimit=20' +
-      '&prop=imageinfo&iiprop=url%7Csize%7Cmime%7Cextmetadata&iiextmetadatafilter=Artist%7CLicenseShortName&iiurlwidth=640';
-    commonsPending[key] = new Promise(function (resolve) {
-      enqueuePhoto(function () {
-        return fetchJSON(url, null, 9000).then(function (json) {
-          var pages = (json && json.query && json.query.pages) || {};
-          var list = Object.keys(pages).map(function (id) {
-            var p = pages[id], info = p.imageinfo && p.imageinfo[0];
-            if (!info || !info.thumburl) return null;
-            var md = info.extmetadata || {};
-            return {
-              id: p.pageid, s: scoreCommons(info, p.title || '', t), i: typeof p.index === 'number' ? p.index : 99,
-              src: info.thumburl, link: info.descriptionurl || '',
-              by: stripTags(md.Artist && md.Artist.value).slice(0, 40), lic: stripTags(md.LicenseShortName && md.LicenseShortName.value).slice(0, 20)
-            };
-          }).filter(function (c) { return c && c.s >= 3; })
+    return lookupOnce(key, function () {
+      var area = P.areaTokens(state.location.label);
+      var ctx = { area: area, name: P.nameTokens(t.name + ' ' + (t.nameEn || ''), area) };
+      return wikimediaJSON(COMMONS_API + '&list=geosearch&gscoord=' + t.lat.toFixed(5) + '%7C' + t.lon.toFixed(5) +
+          '&gsradius=' + trailRadius(t) + '&gsnamespace=6&gslimit=100')
+        .then(function (json) {
+          var near = (json.query && json.query.geosearch) || [];
+          var pre = near.map(function (g, i) { return { pageid: g.pageid, i: i, s: P.titleScore(g.title, ctx) }; })
+            .filter(function (c) { return c.pageid && c.s > -50; })
             .sort(function (a, b) { return (b.s - a.s) || (a.i - b.i); })
-            .slice(0, 6)
-            .map(function (c) { return { id: c.id, src: c.src, link: c.link, by: c.by, lic: c.lic }; });
+            .slice(0, 20);
+          if (!pre.length) return [];
+          return wikimediaJSON(COMMONS_API + '&prop=imageinfo&pageids=' + pre.map(function (c) { return c.pageid; }).join('%7C') +
+              '&iiprop=url%7Csize%7Cmime%7Cextmetadata&iiextmetadatafilter=Artist%7CLicenseShortName' +
+              '&iiurlwidth=960')                     /* a standard Wikimedia width — others are refused */
+            .then(function (json2) {
+              var pages = (json2.query && json2.query.pages) || {};
+              return pre.map(function (c) {
+                var p = pages[c.pageid], info = p && p.imageinfo && p.imageinfo[0];
+                if (!info || !info.thumburl) return null;   /* never the full-size original (can be 60 MB) */
+                var md = info.extmetadata || {};
+                return {
+                  id: P.photoId(p.title), title: String(p.title || '').slice(0, 120),
+                  s: P.score(p.title, info.width, info.height, info.mime, ctx), i: c.i,
+                  src: P.stdThumb(info.thumburl), link: info.descriptionurl || '',
+                  by: stripTags(md.Artist && md.Artist.value).slice(0, 40),
+                  lic: stripTags(md.LicenseShortName && md.LicenseShortName.value).slice(0, 20)
+                };
+              }).filter(function (c) { return c && c.s >= P.MIN_SCORE; })
+                .sort(function (a, b) { return (b.s - a.s) || (a.i - b.i); })
+                .slice(0, 12)
+                .map(function (c) { return { id: c.id, title: c.title, src: c.src, link: c.link, by: c.by, lic: c.lic }; });
+            });
+        })
+        .then(function (list) {
           photoCache[key] = { at: Date.now(), c: list };
           savePhotoCache();
-          resolve(list);
-        }).catch(function () { resolve([]); });        /* offline etc. — not cached, retried next time */
+          return list;
+        });                                         /* errors (offline, “too busy”…) aren't cached — retried next time */
+    });
+  }
+
+  /* Wikipedia: lead photos of lakes / peaks / parks around the area — one lookup per area */
+  function wikiPool() {
+    var lat = state.location.lat, lon = state.location.lon;
+    var key = 'w:' + lat.toFixed(2) + ',' + lon.toFixed(2);
+    var hit = photoCache[key];
+    if (hit && Date.now() - hit.at < PHOTO_TTL) return Promise.resolve(hit.c || []);
+    return lookupOnce(key, function () {
+      var url = 'https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*' +
+        '&generator=geosearch&ggscoord=' + lat.toFixed(5) + '%7C' + lon.toFixed(5) + '&ggsradius=10000&ggslimit=50' +
+        '&prop=pageimages%7Cdescription%7Ccoordinates&piprop=thumbnail%7Cname%7Coriginal&pithumbsize=960' +
+        '&pilimit=50&colimit=50';
+      return wikimediaJSON(url).then(function (json) {
+        var pages = (json.query && json.query.pages) || {};
+        var list = Object.keys(pages).map(function (id) {
+          var p = pages[id], c = p.coordinates && p.coordinates[0], o = p.original || p.thumbnail;
+          if (!p.thumbnail || !p.thumbnail.source || !p.pageimage || !c || !o) return null;
+          if (P.wikiScore(p.title, p.description, p.pageimage, o.width, o.height) < P.MIN_SCORE) return null;
+          return {
+            id: P.photoId(p.pageimage), lat: c.lat, lon: c.lon, src: P.stdThumb(p.thumbnail.source),
+            link: 'https://en.wikipedia.org/wiki/File:' + encodeURIComponent(String(p.pageimage).replace(/ /g, '_')),
+            what: String(p.title).slice(0, 40), title: String(p.title).slice(0, 120)
+          };
+        }).filter(Boolean);
+        photoCache[key] = { at: Date.now(), c: list };
+        savePhotoCache();
+        return list;
       });
     });
-    commonsPending[key].then(function () { delete commonsPending[key]; });
-    return commonsPending[key];
+  }
+  function wikiCandidates(t) {
+    return wikiPool().then(function (pool) {
+      var R = trailRadius(t) + 1500;
+      return pool.map(function (w) { return { w: w, d: C.haversineM(t.lat, t.lon, w.lat, w.lon) }; })
+        .filter(function (x) { return x.d <= R; })
+        .sort(function (a, b) { return a.d - b.d; })
+        .map(function (x) { return x.w; });
+    });
   }
 
   /* ---------- rendering helpers ---------- */
-  var usedPhotoIds = {};                              /* Commons photo id → trail id (no duplicates on the page) */
+  var usedPhotoIds = {};                              /* photo id → trail id (no photo on two cards) */
+  var badPhotos = {};                                 /* photos that failed to load this session */
   function googleCredit(g) {
     return g && g.photoBy ? 'Photo: ' + g.photoBy + ' · Google Maps' : 'Photo · Google Maps';
+  }
+  function photoCredit(c) {
+    return c.what ? '📷 Wikipedia · ' + c.what : '📷 ' + (c.by || 'Wikimedia Commons') + (c.lic ? ' · ' + c.lic : '');
   }
 
   function setPhoto(box, src, credit, link, onFail) {
@@ -598,7 +658,6 @@
     img.className = 'trail-photo';
     img.alt = '';
     img.decoding = 'async';
-    img.referrerPolicy = 'no-referrer';
     img.addEventListener('load', function () {
       img.classList.add('is-in');
       var sk = box.querySelector('.photo-skeleton');
@@ -617,7 +676,7 @@
     box.dataset.kind = 'photo';
   }
 
-  /* Web-Mercator tile mosaic of the trail’s area, sized to the box, start pinned */
+  /* Web-Mercator tile mosaic of the trail’s area, sized to the box, centre pinned */
   function lon2x(lon, z) { return (lon + 180) / 360 * 256 * Math.pow(2, z); }
   function lat2y(lat, z) {
     var s = Math.sin(lat * Math.PI / 180);
@@ -655,37 +714,71 @@
     box.dataset.kind = 'map';
   }
 
-  /* Fill one media box for trail t (card thumbnail or details hero). */
-  function fillTrailMedia(box, t) {
+  /* Fill one media box for trail t (card thumbnail, details hero or a
+     highlights card). opts.plainCredit: credit as text, not a link (the
+     highlights cards are links themselves). */
+  function fillTrailMedia(box, t, opts) {
     if (!box || box.dataset.filled === '1') return;
     box.dataset.filled = '1';
-    var fallback = function () { setMapThumb(box, t); };
-    if (t.google && t.google.photo) {
-      setPhoto(box, t.google.photo, googleCredit(t.google), t.google.gmapsUri, function () { tryCommons(); });
+    var plain = !!(opts && opts.plainCredit);
+    var g = t.google;
+    if (g && g.photo && !badPhotos['g:' + g.id]) {
+      setPhoto(box, g.photo, googleCredit(g), plain ? null : g.gmapsUri, function () { badPhotos['g:' + g.id] = 1; lookUp(); });
       return;
     }
-    tryCommons();
-    function tryCommons() {
+    lookUp();
+
+    function lookUp() {
+      if (!P) { setMapThumb(box, t); return; }
       box.innerHTML = '<span class="photo-skeleton"></span>';
-      var done = false;
-      var timer = setTimeout(function () { if (!done) { done = true; fallback(); } }, 7000);
-      commonsCandidates(t).then(function (list) {
-        if (done) {                                 /* map already shown — upgrade if a photo turned up */
-          if (!list.length || box.dataset.kind !== 'map') return;
-        }
-        done = true;
+      box.dataset.kind = 'loading';
+      var settled = false;
+      var timer = setTimeout(function () { if (!settled) { settled = true; setMapThumb(box, t); } }, 8000);
+      function show(list) {
+        if (settled && box.dataset.kind !== 'map') return true;    /* a photo is already up */
+        var c = freePhoto(list, t);
+        if (!c) return false;
+        settled = true;
         clearTimeout(timer);
-        var pick = null;
-        for (var i = 0; i < list.length; i++) {
-          var owner = usedPhotoIds[list[i].id];
-          if (!owner || owner === t.id) { pick = list[i]; break; }
-        }
-        if (!pick) { fallback(); return; }
-        usedPhotoIds[pick.id] = t.id;
-        var credit = '📷 ' + (pick.by || 'Wikimedia Commons') + (pick.lic ? ' · ' + pick.lic : '');
-        setPhoto(box, pick.src, credit, pick.link, function () { delete usedPhotoIds[pick.id]; fallback(); });
-      });
+        usedPhotoIds[c.id] = t.id;
+        setPhoto(box, c.src, photoCredit(c), plain ? null : c.link, function () {
+          badPhotos[c.id] = 1;                        /* broken link — try the next photo */
+          if (usedPhotoIds[c.id] === t.id) delete usedPhotoIds[c.id];
+          lookUp();
+        });
+        return true;
+      }
+      commonsCandidates(t).then(function (list) {
+        if (show(list)) return null;
+        return wikiCandidates(t).then(function (wl) {
+          if (show(wl)) return;
+          if (!settled) { settled = true; clearTimeout(timer); setMapThumb(box, t); }
+        });
+      }).catch(function () { if (!settled) { settled = true; clearTimeout(timer); setMapThumb(box, t); } });
     }
+  }
+  function freePhoto(list, t) {
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i], owner = usedPhotoIds[c.id];
+      if (!badPhotos[c.id] && (!owner || owner === t.id) && !namesOtherTrail(c, t)) return c;
+    }
+    return null;
+  }
+  /* a photo titled after another trail on the page is kept for that trail’s card */
+  function trailTokens(t) {
+    if (!t._nt || t._ntFor !== state.location.label) {
+      t._nt = P.nameTokens(t.name + ' ' + (t.nameEn || ''), P.areaTokens(state.location.label));
+      t._ntFor = state.location.label;
+    }
+    return t._nt;
+  }
+  function namesOtherTrail(c, t) {
+    if (!c.title || P.namesTrail(c.title, trailTokens(t))) return false;
+    for (var i = 0; i < state.trails.length; i++) {
+      var o = state.trails[i];
+      if (o.id !== t.id && P.namesTrail(c.title, trailTokens(o))) return true;
+    }
+    return false;
   }
 
   /* lazy: fill boxes as they approach the viewport */
@@ -693,8 +786,8 @@
     entries.forEach(function (e) {
       if (!e.isIntersecting) return;
       mediaObserver.unobserve(e.target);
-      var t = trailById(e.target.dataset.trail);
-      if (t) fillTrailMedia(e.target, t);
+      var t = e.target._photoTrail || trailById(e.target.dataset.trail);
+      if (t) fillTrailMedia(e.target, t, e.target._photoOpts);
     });
   }, { rootMargin: '300px 0px' }) : null;
 
@@ -808,7 +901,7 @@
   function mapCaptionText(lib) {
     var bits = [];
     bits.push(lib === 'google' ? 'Map © Google' : 'Map © OpenStreetMap contributors © CARTO');
-    bits.push((state.mode === 'bike' ? '🚴' : '🥾') + ' pins = trail starts (tap one for details)');
+    bits.push((state.mode === 'bike' ? '🚴' : '🥾') + ' pins = trails (tap one for details)');
     if (tracker.active) bits.push('<span style="color:#16a34a">━</span> your track · 🔵 you');
     if (loopPath) bits.push('<span style="color:#7c3aed">━</span> planned loop');
     var cap = bits.join(' · ');
@@ -1441,10 +1534,15 @@
         '<div class="hl-rating">★ ' + p.rating.toFixed(1) + ' · ' + p.count.toLocaleString() + ' reviews</div>' +
         '</div></a>';
     }).join('');
+    /* Google’s own photo when it sends one (it sends none for this key),
+       else a real photo taken around the place, else its map */
     qsa('.hl-media', els.highlightsRow).forEach(function (box) {
       var p = places[+box.dataset.hl];
-      if (p.photo) setPhoto(box, p.photo, p.photoBy ? p.photoBy + ' · Google' : 'Google', null, function () { setMapThumb(box, p); });
-      else setMapThumb(box, p);
+      box._photoTrail = { id: 'hl:' + p.id, name: p.name, lat: p.lat, lon: p.lon, google: p };
+      box._photoOpts = { plainCredit: true };
+      /* lazy like the cards: places swiped off to the side load when they come into view */
+      if (mediaObserver) mediaObserver.observe(box);
+      else fillTrailMedia(box, box._photoTrail, box._photoOpts);
     });
   }
 
@@ -1491,7 +1589,7 @@
           t.google.rating.toFixed(1) + ' (' + t.google.count.toLocaleString() + ')' +
           '<span class="g-src">· Google</span></span>';
       }
-      var dir = C.directionsLinks(t.lat, t.lon)[0];
+      var dir = C.directionsLinks((t.head || t).lat, (t.head || t).lon)[0];
       return '<article class="trail-card" data-id="' + esc(t.id) + '">' +
         '<div class="trail-card__media trail-media" data-trail="' + esc(t.id) + '" role="button" tabindex="-1" aria-label="Details for ' + esc(t.name) + '">' +
         '<span class="photo-skeleton"></span></div>' +
@@ -1501,7 +1599,7 @@
         rating +
         '<div class="trail-card__actions">' +
         '<button class="btn btn-sm btn-soft" type="button" data-details="' + esc(t.id) + '">Details</button>' +
-        '<a class="btn btn-sm btn-primary" href="' + esc(dir.href) + '" target="_blank" rel="noopener">Directions</a>' +
+        '<a class="btn btn-sm btn-primary" data-dir="' + esc(t.id) + '" href="' + esc(dir.href) + '" target="_blank" rel="noopener">Directions</a>' +
         '</div>' +
         '</div></article>';
     }).join('');
@@ -1676,8 +1774,57 @@
   /* ============================================================
      Details modal + elevation profile
      ============================================================ */
+  /* Directions should lead to where the trail STARTS. The point TrailSplits
+     gives for a route is the middle of its bounding box — often mid-mountain,
+     not even on the trail — so once the route’s geometry arrives (the details
+     sheet loads it for the elevation chart anyway) we take its real ends
+     (line ends no other piece continues from) and pick the one nearest to
+     you / the place you searched. Loops start and end at the same spot. */
+  function trailheadOf(geom) {
+    if (!geom) return null;
+    var lines = geom.type === 'LineString' ? [geom.coordinates]
+      : geom.type === 'MultiLineString' ? geom.coordinates : null;
+    if (!lines || !lines.length) return null;
+    var ends = [];
+    lines.forEach(function (l) {
+      if (l && l.length > 1 && l[0] && l[l.length - 1]) { ends.push(l[0]); ends.push(l[l.length - 1]); }
+    });
+    if (!ends.length) return null;
+    function d(a, b) { return C.haversineM(a[1], a[0], b[1], b[0]); }
+    var loose = ends.filter(function (e, i) {
+      for (var j = 0; j < ends.length; j++) if (j !== i && d(e, ends[j]) < 40) return false;
+      return true;
+    });
+    var from = [state.location.lon, state.location.lat];
+    var pool = (loose.length ? loose : ends).slice().sort(function (a, b) { return d(a, from) - d(b, from); });
+    var lat = +pool[0][1], lon = +pool[0][0];
+    if (!isFinite(lat) || !isFinite(lon)) return null;
+    return { lat: +lat.toFixed(6), lon: +lon.toFixed(6), loop: !loose.length };
+  }
+  function trailheadNote(t) {
+    if (t.head) return 'Trailhead: ' + t.head.lat.toFixed(5) + ', ' + t.head.lon.toFixed(5) +
+      (t.head.loop ? ' · loop — it starts and ends here' : ' · the route end nearest ' + (state.location.guessed ? 'this area' : esc(String(state.location.label || 'you').split(',')[0])));
+    if (t.osmId) return 'Route centre: ' + t.lat.toFixed(5) + ', ' + t.lon.toFixed(5) + ' · finding the trailhead…';
+    return 'Location: ' + t.lat.toFixed(5) + ', ' + t.lon.toFixed(5);
+  }
+  function setTrailhead(t, head) {
+    t.head = head;
+    var links = C.directionsLinks(head.lat, head.lon);
+    var row = qs('#dirRow');
+    if (row && qs('#modalTitle') && qs('#modalTitle').textContent === t.name) {
+      qsa('a.btn', row).forEach(function (a) {
+        var l = links.filter(function (x) { return x.label === a.textContent; })[0];
+        if (l) a.href = l.href;
+      });
+      var note = qs('#dirNote');
+      if (note) note.innerHTML = trailheadNote(t) + (t.google && t.google.address ? ' · ' + esc(t.google.address) : '');
+    }
+    qsa('a[data-dir]', els.trailList).forEach(function (a) { if (a.dataset.dir === t.id) a.href = links[0].href; });
+  }
+
   function openDetails(t) {
-    var links = C.directionsLinks(t.lat, t.lon);
+    var here = t.head || t;
+    var links = C.directionsLinks(here.lat, here.lon);
     var rating = (t.google && t.google.rating != null)
       ? '<span class="trail-card__rating"><span class="stars">' + C.stars(t.google.rating) + '</span> ' +
         t.google.rating.toFixed(1) + ' (' + t.google.count.toLocaleString() + ' Google reviews)</span>'
@@ -1699,18 +1846,18 @@
         (t.ascentM != null ? '↑ ' + Math.round(t.ascentM) + ' m' + (t.descentM != null ? ' · ↓ ' + Math.round(t.descentM) + ' m' : '') : '…') + '</div></div>' +
       '</div>' +
       '<p>' + rating + '</p>' +
-      (t.description ? '<p class="muted" style="font-size:.9rem">' + esc(t.description) + '</p>' : '') +
+      (t.description ? '<p class="muted trail-desc">' + esc(t.description.charAt(0).toUpperCase() + t.description.slice(1)) + '</p>' : '') +
       '<div class="modal__section" id="elevSection" hidden>' +
       '<h3>Elevation profile</h3>' +
       '<svg class="elev-chart" id="elevChart" role="img" aria-label="Elevation profile chart"></svg>' +
       '<p class="muted" style="font-size:.8rem" id="elevCaption"></p>' +
       '</div>' +
       '<div class="modal__section"><h3>Getting there</h3>' +
-      '<div class="btn-row" style="justify-content:flex-start">' +
+      '<div class="btn-row" id="dirRow" style="justify-content:flex-start">' +
       links.map(function (l) { return '<a class="btn ' + (l.primary ? 'btn-primary' : 'btn-ghost') + '" href="' + esc(l.href) + '" target="_blank" rel="noopener">' + esc(l.label) + '</a>'; }).join('') +
       (t.google && t.google.gmapsUri ? '<a class="btn btn-ghost" href="' + esc(t.google.gmapsUri) + '" target="_blank" rel="noopener">Open in Google Maps</a>' : '') +
       '</div>' +
-      '<p class="muted" style="margin-top:12px; font-size:.85rem">Start point: ' + t.lat.toFixed(5) + ', ' + t.lon.toFixed(5) +
+      '<p class="muted" id="dirNote" style="margin-top:12px; font-size:.85rem">' + trailheadNote(t) +
       (t.google && t.google.address ? ' · ' + esc(t.google.address) : '') + '</p></div>';
 
     els.backdrop.classList.add('is-open');
@@ -1727,6 +1874,8 @@
         if (climb && typeof props.ascent_m === 'number') {
           climb.textContent = '↑ ' + Math.round(props.ascent_m) + ' m' + (typeof props.descent_m === 'number' ? ' · ↓ ' + Math.round(props.descent_m) + ' m' : '');
         }
+        var head = trailheadOf(rel.geometry);
+        if (head) setTrailhead(t, head);
         if (rel.geometry) {
           return ts.elevationProfile(rel.geometry)
             .catch(function () { return ts.elevationSample(rel.geometry); })
@@ -1740,6 +1889,8 @@
         }
         return null;
       }).catch(function () {
+        var note = qs('#dirNote');
+        if (note && !t.head) note.textContent = note.textContent.replace(' · finding the trailhead…', ' · directions go to the middle of the route');
         var climb = qs('#factClimb');
         if (climb && climb.textContent === '…') climb.textContent = 'not measured';
         var sec = qs('#elevSection');
@@ -1772,9 +1923,9 @@
     chart.innerHTML =
       '<path d="' + area + '" fill="rgba(22,163,74,.18)"/>' +
       '<path d="' + d + '" fill="none" stroke="#166534" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>' +
-      '<text x="' + pad + '" y="' + (pad + 3) + '" font-size="10" fill="#5b6f63" text-anchor="start" dominant-baseline="hanging">' + Math.round(y1) + ' m</text>' +
-      '<text x="' + pad + '" y="' + (H - pad - 3) + '" font-size="10" fill="#5b6f63" text-anchor="start" dominant-baseline="baseline">' + Math.round(y0) + ' m</text>' +
-      '<text x="' + (W - pad) + '" y="' + (H - pad - 3) + '" font-size="10" fill="#5b6f63" text-anchor="end" dominant-baseline="baseline">' + ((x1 - x0) / 1000).toFixed(1) + ' km</text>';
+      '<text x="' + pad + '" y="' + (pad + 3) + '" font-size="10" fill="#5b6f63" stroke="#f0faf3" stroke-width="3" paint-order="stroke" text-anchor="start" dominant-baseline="hanging">' + Math.round(y1) + ' m</text>' +
+      '<text x="' + pad + '" y="' + (H - pad - 3) + '" font-size="10" fill="#5b6f63" stroke="#f0faf3" stroke-width="3" paint-order="stroke" text-anchor="start" dominant-baseline="baseline">' + Math.round(y0) + ' m</text>' +
+      '<text x="' + (W - pad) + '" y="' + (H - pad - 3) + '" font-size="10" fill="#5b6f63" stroke="#f0faf3" stroke-width="3" paint-order="stroke" text-anchor="end" dominant-baseline="baseline">' + ((x1 - x0) / 1000).toFixed(1) + ' km</text>';
     var e = prof.elevation || {};
     cap.textContent = (e.source === 'terrain' ? 'Heights from the TrailSplits terrain model' : 'Heights recorded along the route') +
       ' · ascent ' + (e.ascent_m != null ? Math.round(e.ascent_m) : '—') + ' m · descent ' + (e.descent_m != null ? Math.round(e.descent_m) : '—') + ' m';

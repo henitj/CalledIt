@@ -257,7 +257,7 @@
       hint.innerHTML =
         '<p><strong>Getting around 👋</strong><br>' +
         'Use this bar to jump between <b>Home</b>, <b>Start</b>, <b>Trails</b> and <b>Community</b>. ' +
-        'Tap <b>▾</b> to tuck it away — the <b>Menu</b> button in the corner brings it back.</p>' +
+        'Tap ' + ICONS.chevronDown.replace('<svg', '<svg class="ico-inline" aria-label="the arrow button"') + ' to tuck it away — the <b>Menu</b> button in the corner brings it back.</p>' +
         '<button type="button" class="btn btn-primary btn-sm" id="navHintOk">Got it</button>';
       BODY.appendChild(hint);
       qs('#navHintOk', hint).addEventListener('click', function () {
@@ -277,7 +277,8 @@
       '  <p><strong>CalledIt</strong> — call your next trail, then go walk it.</p>' +
       '  <p class="site-footer__credits">Trail &amp; route data: <a href="https://trailsplits.com" target="_blank" rel="noopener">TrailSplits</a> · ' +
       'Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors · ' +
-      'Photos &amp; ratings: Google · Weather: Open-Meteo (CC BY 4.0)</p>' +
+      'Photos: <a href="https://commons.wikimedia.org" target="_blank" rel="noopener">Wikimedia Commons</a> photographers (credited on each photo) · Ratings: Google · ' +
+      'Weather: Open-Meteo (CC BY 4.0)</p>' +
       '  <p class="site-footer__credits"><button type="button" class="footer-link-btn" id="footerKeys">⚙️ Settings — map key, AI model</button></p>' +
       '</div>';
     BODY.appendChild(f);

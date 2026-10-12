@@ -51,7 +51,7 @@ const srcs = [path.join(ROOT, 'android/app/src/main/java/com/calledit/app/LocalS
 const JAVA = process.env.JAVA || 'java';
 let comp;
 if (process.env.ECJ_JAR) {
-  comp = spawnSync(JAVA, ['-jar', process.env.ECJ_JAR, '-source', '1.7', '-target', '1.7', '-nowarn', ...(process.env.ANDROID_JAR ? ['-bootclasspath', process.env.ANDROID_JAR] : []), '-d', out, ...srcs]);
+  comp = spawnSync(JAVA, ['-jar', process.env.ECJ_JAR, '-source', '1.8', '-target', '1.8', '-nowarn', ...(process.env.ANDROID_JAR ? ['-bootclasspath', process.env.ANDROID_JAR] : []), '-d', out, ...srcs]);
 } else {
   comp = spawnSync('javac', ['-nowarn', '-d', out, ...srcs]);
 }

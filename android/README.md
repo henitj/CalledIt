@@ -19,9 +19,12 @@ builds with plain `javac`/Gradle and stays tiny.
 
 ## Get the APK
 
-1. **In this repo** — [`android/dist/CalledIt-1.2.1.apk`](dist/CalledIt-1.2.1.apk)
+1. **In this repo** — [`android/dist/CalledIt-1.2.2.apk`](dist/CalledIt-1.2.2.apk)
    (signed with the project's debug key; install via “Install unknown apps” or
-   `adb install -r`). It upgrades earlier CalledIt builds in place.
+   `adb install -r`).
+   **Coming from 1.2.1 or older: uninstall the old CalledIt once first.** The
+   1.2.1 signing key was lost in a build-machine reset and Android only updates
+   an app signed with the same key. From 1.2.2 on, every build updates in place.
    *The old 1.1.0 file was removed: it packaged the web pages in the wrong
    assets folder and opened to “Not found”.*
    Tested with `node test/browser/apk-check.mjs`: the APK's bundled files are
@@ -34,7 +37,7 @@ builds with plain `javac`/Gradle and stays tiny.
    itself).
 3. **Locally** — `android/ci/build-apk.sh` builds without Android Studio
    (needs `aapt2`, `d8`, `apksigner`, an `android.jar` and a JVM — or a normal
-   `ANDROID_HOME`; `VERSION_NAME` / `VERSION_CODE` env vars override 1.2.1 / 4),
+   `ANDROID_HOME`; `VERSION_NAME` / `VERSION_CODE` env vars override 1.2.2 / 5),
    and Android Studio can open the `android/` folder directly (Gradle, JDK 17,
    SDK 34):
 
@@ -47,11 +50,28 @@ builds with plain `javac`/Gradle and stays tiny.
    The script ends with a check that the pages sit in `assets/www/` where the
    app serves them from.
 
+   **Signing key.** `ci/debug.keystore` (alias `androiddebugkey`, password
+   `android`) is committed on purpose: a sideloaded app can only be updated by
+   an APK signed with the same key, and keeping it out of git is how the 1.2.1
+   key got lost. It is a debug key — fine for sideloading; for a store release
+   create a private release key and keep it out of the repo.
+
+   **Without an Android SDK** (how 1.2.2 was built, from npm/GitHub only):
+   `aapt2` from the npm package `aaptjs3` (`bin/x64/linux/aapt2`), `apksigner.jar`
+   from `@postar/apktool-node` (`lib/`), the Eclipse compiler from
+   `@vscjava/java-language-server` (`server/plugins/org.eclipse.jdt.core.compiler.batch_*.jar`,
+   pass it as `ECJ_JAR`; it needs `-source 1.8`), `android.jar` (API 34) from the
+   GitHub repo `Sable/android-platforms`, and a JVM from the PyPI package `jdk4py`.
+   npm's `d8-termux` is DEX code for Termux and won't run on a desktop JVM — when
+   only web files changed, `PREBUILT_DEX=android/dist/CalledIt-<previous>.apk`
+   reuses that build's `classes.dex` (the Java sources must be unchanged; they are
+   still compiled, so errors still fail the build).
+
 ## Tests
 
 ```bash
 # LocalServer on a desktop JVM (no Android needed)
-javac -source 1.7 -target 1.7 -d /tmp/ls app/src/main/java/com/calledit/app/LocalServer.java ci/LocalServerTest.java
+javac -source 1.8 -target 1.8 -d /tmp/ls app/src/main/java/com/calledit/app/LocalServer.java ci/LocalServerTest.java
 java -cp /tmp/ls com.calledit.app.LocalServerTest ..
 ```
 

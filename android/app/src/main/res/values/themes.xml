@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.CalledIt" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">#14532D</item>
+        <item name="android:colorPrimaryDark">#0B2E1F</item>
+        <item name="android:colorAccent">#F59E0B</item>
+        <item name="android:windowBackground">#F4F7F4</item>
+        <item name="android:statusBarColor">#0B2E1F</item>
+    </style>
+</resources>

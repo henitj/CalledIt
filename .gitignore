@@ -1,6 +1,16 @@
-node_modules/
+node_modules
 .DS_Store
 Thumbs.db
 *.log
 .venv/
 __pycache__/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/app/src/main/assets/www/
+android/ci/build/
+# android/ci/debug.keystore is committed ON PURPOSE: the APK is sideloaded, and every
+# build must be signed with the same key or Android refuses to update the installed app
+# (losing this key in v1.2.1 forced a reinstall). It's a debug key; see android/README.md.
+android/dist/*.idsig

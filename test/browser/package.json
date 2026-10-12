@@ -1,0 +1,14 @@
+{
+  "name": "calledit-browser-tests",
+  "private": true,
+  "description": "Real-browser end-to-end tests for the CalledIt website and the Android APK",
+  "type": "module",
+  "scripts": {
+    "test": "node site-check.mjs",
+    "test:apk": "node apk-check.mjs"
+  },
+  "devDependencies": {
+    "@sparticuz/chromium": "^153.0.0",
+    "puppeteer-core": "^25.0.0"
+  }
+}

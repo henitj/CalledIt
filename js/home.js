@@ -25,7 +25,8 @@
     'We detected <b>' + C.escapeHtml(d.osLabel) + '</b> running <b>' + C.escapeHtml(d.browser) + '</b>' + (d.touch ? ' with a touchscreen' : '') + '.',
     mapsNote,
     C.installInstructions(),
-    'The bottom bar switches between pages — hide it with ▾, bring it back with the Menu button.'
+    'The bottom bar switches between pages — hide it with ' + C.icons.chevronDown.replace('<svg', '<svg class="ico-inline" aria-label="the arrow button"') +
+      ', bring it back with the Menu button.'
   ];
 
   var ul = C.qs('#deviceFacts');

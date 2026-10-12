@@ -19,6 +19,147 @@
     return Math.round(d / 864e5) + ' d ago';
   }
 
+  /* ---------------- profile (name + photo) ----------------
+     The photo is downscaled to 256px JPEG client-side before saving —
+     that keeps localStorage happy and makes upload work even in WebViews
+     (the Android app forwards file-chooser requests to the system picker). */
+  var profile = store('calledit_profile_v1') || { name: '', photo: null };
+
+  function renderProfile() {
+    var img = qs('#avatarImg'), fb = qs('#avatarFallback');
+    if (profile.photo) {
+      img.src = profile.photo;
+      img.hidden = false;
+      fb.hidden = true;
+    } else {
+      img.hidden = true;
+      fb.hidden = false;
+      fb.textContent = (profile.name || '🙂').trim().charAt(0).toUpperCase() || '🙂';
+    }
+    if (qs('#profileName') && document.activeElement !== qs('#profileName')) {
+      qs('#profileName').value = profile.name || '';
+    }
+    var pts = store('calledit_points_v1');
+    var bags = store('calledit_bags_v1');
+    qs('#karmaPoints').textContent = typeof pts === 'number' ? pts : 0;
+    qs('#karmaBags').textContent = typeof bags === 'number' ? bags : 0;
+  }
+
+  function saveProfile() {
+    try {
+      store('calledit_profile_v1', profile);
+    } catch (e) {
+      C.toast('Couldn’t save the photo on this device (storage full) — try a smaller image.');
+    }
+  }
+
+  function handlePhotoFile(file) {
+    if (!file) return;
+    if (!/^image\//.test(file.type)) { C.toast('Please choose an image file (jpg, png…)'); return; }
+    if (file.size > 12 * 1024 * 1024) { C.toast('That image is over 12 MB — pick a smaller one'); return; }
+    var reader = new FileReader();
+    reader.onerror = function () { C.toast('Couldn’t read that file — try another photo.'); };
+    reader.onload = function () {
+      var im = new Image();
+      im.onerror = function () { C.toast('That doesn’t look like a valid image — try another.'); };
+      im.onload = function () {
+        try {
+          var max = 256;
+          var scale = Math.min(1, max / Math.max(im.width, im.height));
+          var w = Math.max(1, Math.round(im.width * scale)), h = Math.max(1, Math.round(im.height * scale));
+          var canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(im, 0, 0, w, h);
+          profile.photo = canvas.toDataURL('image/jpeg', 0.85);
+          saveProfile();
+          renderProfile();
+          C.toast('Profile photo updated 📸');
+        } catch (e) {
+          C.toast('Couldn’t process that photo — try a different one.');
+        }
+      };
+      im.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  var avatarInput = qs('#avatarInput');
+  if (avatarInput) {
+    avatarInput.addEventListener('change', function () {
+      handlePhotoFile(avatarInput.files && avatarInput.files[0]);
+      avatarInput.value = '';   /* allow re-picking the same file */
+    });
+    /* extra-proof for WebViews: tap anywhere on the avatar block opens the
+       picker via JS (label activation is unreliable in some WebViews). The
+       input is outside the label to avoid double-opening. */
+    qs('.avatar-wrap').addEventListener('click', function (e) {
+      if (e.target !== avatarInput) {
+        e.preventDefault();
+        avatarInput.click();
+      }
+    });
+  }
+  var nameInput = qs('#profileName');
+  if (nameInput) {
+    nameInput.addEventListener('input', function () {
+      profile.name = nameInput.value;
+      saveProfile();
+    });
+  }
+
+  /* ---------------- pack-it-out points (sane amounts) ----------------
+     5 points per bag — max 3 bags per log and max 3 logs per day
+     (45 points/day). It’s a thank-you, not a grind. */
+  var PTS_PER_BAG = 5, MAX_BAGS = 3, MAX_LOGS_PER_DAY = 3;
+
+  function todayKey() { return new Date().toDateString(); }
+  function litterLogs() { return store('calledit_litter_v1') || []; }
+
+  function renderLitter() {
+    var logs = litterLogs().slice(0, 8);
+    qs('#litterLog').innerHTML = logs.length
+      ? '<div class="report-list" style="margin-top:14px">' + logs.map(function (l) {
+          return '<div class="report"><div class="report__top">' +
+            '<span class="chip chip--amber">🧺 ' + l.bags + ' bag' + (l.bags > 1 ? 's' : '') + ' · +' + (l.bags * PTS_PER_BAG) + ' pts</span>' +
+            (l.trail ? '<span class="report__trail">' + esc(l.trail) + '</span>' : '') +
+            '<span class="report__time">' + timeAgo(l.ts) + '</span></div>' +
+            (l.note ? '<p class="report__text">' + esc(l.note) + '</p>' : '') +
+            '</div>';
+        }).join('') + '</div>'
+      : '';
+    renderProfile();
+  }
+
+  qs('#litterForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var logs = litterLogs();
+    var todayCount = logs.filter(function (l) { return new Date(l.ts).toDateString() === todayKey(); }).length;
+    if (todayCount >= MAX_LOGS_PER_DAY) {
+      C.toast('That’s ' + MAX_LOGS_PER_DAY + ' logs today — plenty of karma already! Come back tomorrow. 🌲');
+      return;
+    }
+    var bags = Math.min(MAX_BAGS, Math.max(1, parseInt(qs('#litterBags').value, 10) || 1));
+    var entry = {
+      ts: Date.now(),
+      bags: bags,
+      trail: qs('#litterTrail').value.trim(),
+      note: qs('#litterNote').value.trim()
+    };
+    logs.unshift(entry);
+    store('calledit_litter_v1', logs.slice(0, 100));
+    var pts = (store('calledit_points_v1') || 0) + bags * PTS_PER_BAG;
+    var bagTotal = (store('calledit_bags_v1') || 0) + bags;
+    try {
+      localStorage.setItem('calledit_points_v1', JSON.stringify(pts));
+      localStorage.setItem('calledit_bags_v1', JSON.stringify(bagTotal));
+    } catch (e2) { }
+    qs('#litterForm').reset();
+    renderLitter();
+    C.toast('+' + (bags * PTS_PER_BAG) + ' trail-karma points — thank you! 💚');
+  });
+
+  renderLitter();
+
   /* ---------------- Pack-It-Out pledge ---------------- */
   var GOAL = 250;
   var count = store('calledit_pledge_total');

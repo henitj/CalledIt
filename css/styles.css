@@ -49,6 +49,9 @@ body {
   padding-bottom: calc(var(--nav-h) + var(--nav-gap) * 2 + 16px);
 }
 img { max-width: 100%; display: block; }
+/* the hidden attribute always wins (the rule above used to un-hide the empty
+   profile <img>, showing a broken image before any photo was chosen) */
+[hidden] { display: none !important; }
 button { font: inherit; color: inherit; cursor: pointer; }
 /* snappy, glitch-free tapping on mobile (kills double-tap-zoom delays) */
 a, button, [role="button"], input, select, textarea, label {
@@ -287,6 +290,7 @@ main { display: block; }
 /* ---------------- device card (home) ---------------- */
 .device-card {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);     /* never wider than the screen */
   gap: 18px;
   align-items: center;
   background: linear-gradient(135deg, var(--green-900), var(--green-700));
@@ -305,11 +309,13 @@ main { display: block; }
   margin-inline: auto;
 }
 .device-card ul { list-style: none; display: grid; gap: 10px; margin-top: 12px; }
-.device-card li { display: flex; gap: 10px; align-items: flex-start; }
-.device-card li::before { content: '✓'; color: var(--amber-400); font-weight: 800; }
+/* plain wrapping lines with the tick in the margin — as a flex row, every <b> in a
+   fact became its own unbreakable box and pushed the page wider than the phone */
+.device-card li { position: relative; padding-left: 22px; }
+.device-card li::before { content: '✓'; position: absolute; left: 0; top: 0; color: var(--amber-400); font-weight: 800; }
 .device-card .chip { background: rgba(255, 255, 255, .16); color: #fff; }
 @media (min-width: 820px) {
-  .device-card { grid-template-columns: auto 1fr; gap: clamp(22px, 4vw, 44px); }
+  .device-card { grid-template-columns: auto minmax(0, 1fr); gap: clamp(22px, 4vw, 44px); }
   .device-card__icon { width: 96px; height: 96px; font-size: 52px; margin: 0; }
 }
 
@@ -464,7 +470,7 @@ body.nav-hidden .nav-reopen { display: inline-flex; }
   transform: translateX(-50%) rotate(45deg);
 }
 .nav-hint p { font-size: .93rem; margin-bottom: 12px; color: var(--ink-soft); }
-.nav-hint.is-gone { opacity: 0; transform: translate(-50%, 12px); transition: .3s; }
+.nav-hint.is-gone { opacity: 0; transform: translate(-50%, 12px); transition: .3s; pointer-events: none; }
 @keyframes hint-in {
   from { opacity: 0; transform: translate(-50%, 24px); }
   to { opacity: 1; transform: translate(-50%, 0); }
@@ -681,7 +687,7 @@ body.nav-hidden .nav-reopen { display: inline-flex; }
   color: var(--ink);
   transition: transform .2s, box-shadow .2s;
 }
-.hl-card img { width: 100%; height: 110px; object-fit: cover; background: var(--green-100); }
+.hl-media { position: relative; height: 112px; overflow: hidden; background: var(--green-100); }
 .hl-card .hl-body { padding: 10px 12px; }
 .hl-card .hl-name { font-weight: 700; font-size: .86rem; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .hl-card .hl-rating { font-size: .78rem; color: #92400e; font-weight: 700; margin-top: 4px; }
@@ -720,7 +726,7 @@ body.nav-hidden .nav-reopen { display: inline-flex; }
 .trail-list { display: grid; gap: 14px; align-content: start; }
 .trail-card {
   display: grid;
-  grid-template-columns: 132px 1fr;
+  grid-template-columns: 1fr;          /* phones: photo on top, full width */
   background: #fff;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -732,7 +738,18 @@ body.nav-hidden .nav-reopen { display: inline-flex; }
   .trail-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
   .hl-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
 }
-.trail-card__img { width: 100%; height: 100%; object-fit: cover; min-height: 132px; background: var(--green-100); }
+/* trail photos: a 16:9 picture on top on phones (no more narrow strips),
+   a 200px column beside the text on wider screens */
+.trail-card__media {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: 230px;
+  overflow: hidden;
+  background: var(--green-100);
+  cursor: pointer;
+}
+@supports not (aspect-ratio: 1 / 1) { .trail-card__media { height: 200px; } }
 .trail-card__body { padding: 12px 14px; display: grid; gap: 6px; align-content: start; min-width: 0; }
 .trail-card__name { font-size: 1.02rem; line-height: 1.25; overflow-wrap: anywhere; }
 .trail-card__meta { display: flex; flex-wrap: wrap; gap: 5px 8px; align-items: center; font-size: .84rem; color: var(--muted); }
@@ -740,8 +757,73 @@ body.nav-hidden .nav-reopen { display: inline-flex; }
 .trail-card__rating .stars { color: var(--amber-500); letter-spacing: .04em; }
 .trail-card__rating .g-src { color: var(--muted); font-weight: 600; }
 .trail-card__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
-@media (min-width: 560px) and (max-width: 979px) {
-  .trail-card { grid-template-columns: 190px 1fr; }
+@media (min-width: 560px) {
+  .trail-card { grid-template-columns: 210px 1fr; }
+  .trail-card__media { aspect-ratio: auto; max-height: none; height: auto; min-height: 168px; }
+}
+@media (min-width: 980px) {
+  .trail-card { grid-template-columns: 200px 1fr; }
+}
+.trail-media > .trail-photo,
+.hl-media > .trail-photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity .35s ease;
+}
+.trail-media > .trail-photo.is-in,
+.hl-media > .trail-photo.is-in { opacity: 1; }
+.photo-skeleton {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, rgba(255,255,255,0) 20%, rgba(255,255,255,.6) 50%, rgba(255,255,255,0) 80%) var(--green-100);
+  background-size: 200% 100%;
+  animation: shimmer 1.3s linear infinite;
+}
+@keyframes shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+.photo-credit {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  z-index: 2;
+  max-width: calc(100% - 12px);
+  font-size: .62rem;
+  line-height: 1.35;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(0, 0, 0, .5);
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+a.photo-credit:hover { background: rgba(0, 0, 0, .72); }
+.map-thumb { position: absolute; inset: 0; overflow: hidden; background: #e9efe9; }
+.map-thumb .tile { position: absolute; width: 256px; height: 256px; max-width: none; user-select: none; pointer-events: none; }
+.map-thumb__pin { position: absolute; transform: translate(-50%, -100%); filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .35)); }
+.map-thumb__pin svg { display: block; }
+.map-thumb__tag {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .02em;
+  color: var(--green-800);
+  background: rgba(255, 255, 255, .92);
+  padding: 3px 9px;
+  border-radius: 999px;
+  box-shadow: var(--shadow-sm);
+}
+@media (prefers-reduced-motion: reduce) {
+  .photo-skeleton { animation: none; }
+  .trail-media > .trail-photo, .hl-media > .trail-photo { transition: none; }
 }
 .empty-state, .loading-state {
   text-align: center;
@@ -795,22 +877,17 @@ body.nav-hidden .nav-reopen { display: inline-flex; }
   .modal { border-radius: 24px; padding-bottom: 32px; }
 }
 @keyframes sheet-up { from { transform: translateY(60px); opacity: 0; } to { transform: none; opacity: 1; } }
-.modal__close {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  display: grid;
-  place-items: center;
-  width: 38px; height: 38px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--green-100);
-  color: var(--green-800);
-  font-size: 1.1rem;
-  font-weight: 800;
-  z-index: 2;
-}
 .modal h2 { font-size: 1.45rem; margin: 4px 0 8px; padding-right: 40px; }
+/* full-bleed trail photo at the top of the details sheet; the sticky ✕ floats over it */
+.modal-hero {
+  position: relative;
+  height: 200px;
+  overflow: hidden;
+  background: var(--green-100);
+  margin: -64px calc(-1 * clamp(16px, 3vw, 28px)) 14px;
+  border-radius: 24px 24px 0 0;
+}
+@media (min-width: 720px) { .modal-hero { height: 250px; } }
 .modal .fact-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 14px 0; }
 @media (min-width: 560px) { .modal .fact-grid { grid-template-columns: repeat(3, 1fr); } }
 .fact { background: var(--green-50); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; text-align: center; }
@@ -1010,8 +1087,258 @@ body.kb-open .assistant-sheet {
 }
 body.kb-open .toast { bottom: 14px; }
 
+/* ---------------- modal close button (always reachable) ----------------
+   Sticky inside the modal’s scroll area: it stays in the top-right corner
+   while the details scroll and keeps a big tap target — the old absolute
+   ✕ could scroll away and become untappable on phones/WebView. */
+.modal__close {
+  position: sticky;
+  top: 8px;
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--green-100);
+  color: var(--green-800);
+  font-size: 1.1rem;
+  font-weight: 800;
+  z-index: 5;
+  box-shadow: var(--shadow-sm);
+}
+.modal__close svg { pointer-events: none; }
+
+/* ---------------- settings dialog (API keys) ---------------- */
+.settings-modal { max-width: 520px; }
+.settings-grid { display: grid; gap: 12px; margin-top: 14px; }
+.settings-grid label { display: grid; gap: 6px; font-weight: 700; font-size: .92rem; }
+.settings-grid input {
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  padding: 11px 14px;
+  font: inherit;
+  font-size: 16px;
+}
+.settings-grid input:focus { outline: none; border-color: var(--green-500); }
+.footer-link-btn {
+  border: 0;
+  background: transparent;
+  color: var(--green-600);
+  font: inherit;
+  font-size: inherit;
+  text-decoration: underline;
+  padding: 0;
+}
+
+/* ---------------- location-services prompt ---------------- */
+.loc-prompt {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  background: rgba(7, 33, 26, .55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.loc-prompt__card {
+  background: #fff;
+  border-radius: 20px;
+  padding: 22px;
+  max-width: 420px;
+  width: 100%;
+  box-shadow: var(--shadow-lg);
+}
+.loc-prompt__card h2 { font-size: 1.25rem; margin-bottom: 8px; }
+.loc-prompt__card p { color: var(--ink-soft); font-size: .95rem; }
+
+/* ---------------- live tracker panel (trails page) ---------------- */
+.track-panel {
+  background: #fff;
+  border: 1.5px solid var(--amber-400);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin: 12px 0 4px;
+  box-shadow: var(--shadow-sm);
+}
+.track-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+@media (min-width: 640px) { .track-stats { grid-template-columns: repeat(4, 1fr); } }
+.track-stat {
+  background: var(--green-50);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 10px;
+  text-align: center;
+}
+.track-stat .k {
+  font-size: .68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+}
+.track-stat .v { font-weight: 800; color: var(--green-800); font-size: 1.05rem; }
+.track-note { margin-top: 10px; font-size: .82rem; color: var(--muted); }
+.btn.is-on { box-shadow: 0 0 0 3px rgba(245, 158, 11, .45); }
+
+/* ---------------- profile card + litter log (social page) ---------------- */
+.profile-card {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  max-width: 860px;
+  margin: 0 auto 18px;
+  flex-wrap: wrap;
+}
+.avatar-wrap {
+  position: relative;
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--green-100);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+  border: 3px solid var(--green-500);
+}
+.avatar-wrap img { width: 100%; height: 100%; object-fit: cover; }
+.avatar-fallback { font-size: 2.6rem; font-weight: 800; color: var(--green-700); }
+.avatar-edit {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  background: rgba(7, 33, 26, .72);
+  color: #fff;
+  font-size: .72rem;
+  font-weight: 700;
+  text-align: center;
+  padding: 4px 2px 9px;        /* sits low in the circle — keep the text short so it isn’t clipped */
+}
+.profile-meta { flex: 1 1 220px; display: grid; gap: 8px; }
+.profile-meta input {
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  padding: 11px 14px;
+  font: inherit;
+  font-size: 16px;
+  max-width: 320px;
+}
+.profile-meta input:focus { outline: none; border-color: var(--green-500); }
+.karma-line { font-size: 1.02rem; color: var(--green-800); }
+.litter-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--green-50);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+.litter-row select {
+  border: 1.5px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 16px;
+  background: #fff;
+}
+
+/* ---------------- assistant typing dots ---------------- */
+.msg--typing {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  min-height: 20px;
+}
+.msg--typing .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green-500);
+  animation: typing-bounce 1s infinite ease-in-out;
+}
+.msg--typing .dot:nth-child(2) { animation-delay: .15s; }
+.msg--typing .dot:nth-child(3) { animation-delay: .3s; }
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: none; opacity: .5; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
 /* reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   html { scroll-behavior: auto; }
 }
+
+/* ============================================================
+   v1.2 — backup map (Leaflet), docked tracking map, Grok assistant
+   ============================================================ */
+.map-canvas {
+  width: 100%;
+  height: 300px;
+  border-radius: var(--radius-lg);
+  background: #dfe9e2;
+  overflow: hidden;
+  z-index: 0;
+}
+@media (min-width: 980px) { .map-canvas { height: 560px; } }
+.map-panel.is-docked { margin: 12px 0 4px; }
+.map-panel.is-docked #googleMap,
+.map-panel.is-docked .map-canvas { height: 46vh; min-height: 260px; }
+.lf-pin {
+  display: grid; place-items: center;
+  width: 26px; height: 26px; border-radius: 50%;
+  background: #fff; border: 2px solid var(--green-700, #15803d);
+  box-shadow: 0 2px 6px rgba(0,0,0,.25);
+  font-size: 14px; line-height: 1;
+}
+.leaflet-container { font: inherit; }
+.leaflet-control-attribution { font-size: 10px; }
+
+/* assistant header: title + model status + new chat */
+.assistant-sheet__title { min-width: 0; }
+.assistant-sheet__title .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.assistant-sheet__head .assistant-new { margin-left: auto; }
+.assistant-sheet__head .assistant-new + button { margin-left: 6px; }
+
+/* typing indicator with a live “what I’m doing” label */
+.msg--typing { display: flex; align-items: center; gap: 4px; }
+.msg--typing .typing-label { margin-left: 8px; font-size: .8rem; color: var(--muted); }
+
+/* formatted AI replies */
+.msg--bot ul, .msg--bot ol { margin: 4px 0 4px 1.1em; padding: 0; }
+.msg--bot li { margin: 2px 0; }
+.msg--bot code { background: var(--green-50, #f0fdf4); border-radius: 4px; padding: 0 4px; font-size: .85em; }
+.msg--bot a { color: var(--green-700, #15803d); font-weight: 600; }
+.msg-note {
+  margin-top: 8px; padding: 8px 10px; border-radius: 10px;
+  background: #fffbeb; border: 1px solid #fde68a; font-size: .82rem;
+}
+.msg-local { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: .86rem; }
+.assistant-input button:disabled { opacity: .6; }
+
+/* settings dialog extras */
+.settings-grid select {
+  width: 100%; margin-top: 6px; padding: 10px 12px; border-radius: 12px;
+  border: 1.5px solid var(--line); background: #fff; font: inherit; font-size: 16px;
+}
+.settings-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--green-50, #f0fdf4);
+}
+
+/* v1.2.2 polish */
+.ico-inline { width: 1.05em; height: 1.05em; vertical-align: -0.18em; display: inline-block; }
+.modal .trail-desc { font-size: .9rem; margin-top: 6px; }
+/* the trail assistant's Ask button floats above the bottom bar — leave room so the
+   footer (and its Settings link) can scroll clear of it */
+body[data-page="trails"] { padding-bottom: calc(var(--nav-h) + var(--nav-gap) * 2 + 16px + 64px + var(--safe-b, 0px)); }

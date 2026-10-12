@@ -1,0 +1,75 @@
+name: Android APK
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Web smoke tests
+        run: |
+          node --check js/app.js
+          node --check js/config.js
+          node --check js/home.js
+          node --check js/social.js
+          node --check js/start.js
+          node --check js/trails.js
+          node test/dom-check.js
+          node test/photo-check.js
+          npm i --no-save --prefix /tmp/t jsdom@24
+          NODE_PATH=/tmp/t/node_modules node test/assistant-check.js
+          NODE_PATH=/tmp/t/node_modules node test/tracker-stress.js
+
+      - name: Browser end-to-end tests (website)
+        run: |
+          npm i --no-save --prefix test/browser puppeteer-core@25
+          CHROME_PATH="$(command -v google-chrome || command -v chromium)" node test/browser/site-check.mjs
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: LocalServer JVM test
+        run: |
+          javac -source 1.8 -target 1.8 -d /tmp/ls android/app/src/main/java/com/calledit/app/LocalServer.java android/ci/LocalServerTest.java android/ci/ServeAssets.java
+          java -cp /tmp/ls com.calledit.app.LocalServerTest .
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build APKs
+        working-directory: android
+        run: gradle assembleDebug assembleRelease
+
+      - name: APK end-to-end test (site inside the APK, served by the app's LocalServer)
+        run: CHROME_PATH="$(command -v google-chrome || command -v chromium)" node test/browser/apk-check.mjs android/app/build/outputs/apk/debug/*.apk
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: calledit-apk
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Attach APKs to the apk-latest release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          gh release create apk-latest --title "CalledIt APK (latest)" --notes "Auto-built APK from the latest main build." --clobber 2>/dev/null || true
+          gh release upload apk-latest android/app/build/outputs/apk/debug/*.apk android/app/build/outputs/apk/release/*.apk --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
